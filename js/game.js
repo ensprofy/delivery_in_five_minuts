@@ -58,7 +58,7 @@ const awningList = [];  // [x, y, w]
 
 // Holes in the street, people walking about, puddles that slow you down.
 const pits = [];        // { x, w }
-const pedestrians = []; // { x, min, max, dir, speed, look, anim }
+const pedestrians = []; // { x, min, max, dir, speed, look, anim, floor, still }: on the street or on balconies
 const puddles = [];     // { x, w }
 const clockSpots = [];  // { x, y, gold }: where the bonus clocks hang
 const balconyList = []; // [x, y, w]
@@ -86,6 +86,11 @@ function generateObstacles(r) {
   }
   const step4 = (lo, hi) => lo + Math.floor(r() * ((hi - lo) / 4 + 1)) * 4; // random multiple of 4
   const clock = (x, y, gold = false) => clockSpots.push({ x, y, gold });
+  // Someone on a balcony: pacing along it, or leaning on the railing
+  const resident = (bx, w, floor, d, still = false) => pedestrians.push({
+    x: bx + r() * (w - 12), min: bx, max: bx + w - 12, dir: r() < 0.5 ? -1 : 1,
+    speed: 16 + r() * (10 + d * 14), look: Math.floor(r() * 4), anim: 0, floor, still,
+  });
 
   // ----- Parkour pieces. Each returns its width. Jump sizes are kept inside
   // what the courier can do: about 64 px across on the level, ~50 px when
@@ -169,8 +174,9 @@ function generateObstacles(r) {
     awningList.push([x + 24, 112, 64]);
     const bx = x + 48;
     balconyList.push([bx, 80, 64]);
-    const boxes = 1 + Math.floor(r() * 2);
-    for (let i = 0; i < boxes; i++) crateList.push([bx + 16 + i * 16, 64]);
+    crateList.push([bx + 16, 64]);
+    if (r() < 0.5) crateList.push([bx + 32, 64]);
+    else if (r() < 0.6) resident(bx + 36, 28, 80, 0.5, true);
     if (r() < 0.7) clock(bx + 56, 66);
     let end = bx + 64;
     if (r() < 0.5) {
@@ -188,30 +194,36 @@ function generateObstacles(r) {
   // clocks to grab. Balconies are 56 px wide and the gaps 24–32 px, so a full
   // jump from the edge lands on the next one going up, level or down.
   function balconyRun(x, d) {
-    const overPit = r() < 0.4 + d * 0.3;
+    const overPit = r() < 0.55 + d * 0.3;
     const n = 3 + Math.floor(r() * (2 + d * 2));
     const W = 56;
     let y = 112; // the first one can be reached from the pavement
     let bx = x + 24;
     const spots = [];
+    const withBox = new Set();
     for (let i = 0; i < n; i++) {
       balconyList.push([bx, y, W]);
       spots.push([bx, y]);
+      // Over a pit, boxes stand flush with the far edge: hopping one is the same
+      // as jumping a little early to the next balcony, and that gap is kept at
+      // its shortest so the early jump still makes it.
+      const box = overPit && i > 0 && r() < 0.3 + d * 0.2;
+      if (box) { crateList.push([bx + W - 16, y - 16]); withBox.add(i); }
       if (i === n - 1) break;
       const dy = i === 0 ? pick([0, -16, -16]) : pick([-16, 0, 16, 32]);
       const ny = Math.max(80, Math.min(112, y + dy));
-      bx += W + (ny < y ? step4(24, 28) : step4(24, 32));
+      bx += W + (box ? 24 : ny < y ? step4(24, 28) : step4(24, 32));
       y = ny;
     }
     const end = bx + W + 28;
-    // A clock on one of the balconies, at its far end so it never needs a hop
+    if (overPit) pits.push({ x, w: end - x });
+    // A clock on one of the balconies, at its far end (above the box if there is one)
     if (r() < 0.45) {
-      const [cx, cy] = spots[1 + Math.floor(r() * (spots.length - 1))];
-      clock(cx + W - 10, cy - 14);
+      const i = 1 + Math.floor(r() * (spots.length - 1));
+      const [cx, cy] = spots[i];
+      clock(cx + W - 10, withBox.has(i) ? cy - 30 : cy - 14);
     }
-    if (overPit) {
-      pits.push({ x, w: end - x });
-    } else {
+    if (!overPit) {
       // Down on the pavement: people and puddles; up top: a box or two in the way
       if (r() < 0.7) {
         pedestrians.push({
@@ -220,8 +232,11 @@ function generateObstacles(r) {
         });
       }
       if (r() < 0.5) puddles.push({ x: x + 40 + Math.floor(r() * 40), w: 48 + Math.floor(r() * 3) * 8 });
+      // Up top: boxes and people to hop over; bump into someone and you drop to the street
       for (const [sx, sy] of spots.slice(1)) {
-        if (r() < 0.3) crateList.push([sx + W / 2 - 8, sy - 16]);
+        const what = r();
+        if (what < 0.35) crateList.push([sx + W / 2 - 8, sy - 16]);
+        else if (what < 0.7) resident(sx, W, sy, d);
       }
     }
     return end - x;
@@ -237,20 +252,20 @@ function generateObstacles(r) {
       // plus room to land: dropping off the last platform carries you ~80 px
       // Balconies are the backbone: chains of them come up most often
       width = pick([balconyRun, balconyRun, balconyRun, balconies, bridge, pillars, stairs, tower])(x, d) + 56;
-    } else if (roll < 0.36 + d * 0.16) {
+    } else if (roll < 0.47 + d * 0.18) {
       // Pit: 32 px early on, up to 48 px later (a full-speed jump clears about 54)
       width = 32 + Math.floor(r() * (1 + d * 1.99)) * 8;
       pits.push({ x, w: width });
       if (r() < 0.35) awningList.push([x - 8, 96 + Math.floor(r() * 2) * 10, width + 16]);
       else if (r() < 0.15) clock(x + width / 2, 100); // grab it mid-jump
-    } else if (roll < 0.50 + d * 0.16) {
+    } else if (roll < 0.58 + d * 0.16) {
       // Pedestrian strolling back and forth
       width = 90 + Math.floor(r() * 60);
       pedestrians.push({
         x: x + r() * width, min: x, max: x + width, dir: r() < 0.5 ? -1 : 1,
         speed: 22 + r() * (14 + d * 22), look: Math.floor(r() * 4), anim: 0,
       });
-    } else if (roll < 0.57 + d * 0.12) {
+    } else if (roll < 0.64 + d * 0.12) {
       // Puddle, often with a crate in the middle of it
       width = 48 + Math.floor(r() * 4) * 8;
       puddles.push({ x, w: width });
@@ -272,7 +287,7 @@ function generateObstacles(r) {
       // Later on, a pit often follows a crate pile
       const lastH = pattern[pattern.length - 1][1];
       const tallest = Math.max(...pattern.map(([, h]) => h));
-      if (d > 0.3 && r() < d * 0.6) {
+      if (r() < 0.2 + d * 0.6) {
         const pw = 32 + Math.floor(r() * 2) * 8;
         // Right behind a pile too tall to hop over from the ground, so the only way
         // across is a leap from its top; otherwise leave room to land before the pit.
@@ -286,6 +301,31 @@ function generateObstacles(r) {
     }
     // Less breathing room between obstacles the further you get
     x += width + Math.max(40, 100 - d * 50) + Math.floor(r() * 70);
+  }
+
+  // Balconies on the upper floors of nearly every house: a free route along the
+  // facades with boxes, people and the odd clock. They keep clear of other
+  // platforms, of tall crate piles, and of the 130 px before a pit, so dropping
+  // off one never lands you in a hole.
+  const clear = (x0, x1) =>
+    !awningList.some(([ax, , aw]) => ax < x1 + 24 && ax + aw > x0 - 24) &&
+    !balconyList.some(([ax, , aw]) => ax < x1 + 24 && ax + aw > x0 - 24) &&
+    !pits.some((pt) => x0 - 8 < pt.x + pt.w + 10 && x1 + 8 > pt.x - 130);
+  for (let fx = 330; fx < DEST.x - 260; fx += 96 + Math.floor(r() * 64)) {
+    const w = pick([48, 56, 64]);
+    const y = pick([64, 80, 80]);
+    if (!clear(fx, fx + w)) continue;
+    if (crateList.some(([cx, cy]) => cx < fx + w && cx + 16 > fx && cy < y + 48)) continue;
+    balconyList.push([fx, y, w]);
+    const d = Math.max(0, (fx - START) / (END - START));
+    const what = r();
+    if (what < 0.4) {
+      crateList.push([fx + 8 + Math.floor(r() * (w - 32)), y - 16]);
+    } else if (what < 0.7) {
+      resident(fx, w, y, d);
+    } else if (what < 0.76) {
+      clock(fx + w - 10, y - 14);
+    }
   }
 }
 
@@ -1065,17 +1105,23 @@ function splash(x, y) {
 function updatePedestrians(dt) {
   const p = player;
   for (const ped of pedestrians) {
-    ped.x += ped.dir * ped.speed * dt;
-    if (ped.x < ped.min) { ped.x = ped.min; ped.dir = 1; }
-    if (ped.x > ped.max) { ped.x = ped.max; ped.dir = -1; }
-    ped.anim += ped.speed * dt;
+    const floor = ped.floor || GROUND_Y;
+    if (!ped.still) {
+      ped.x += ped.dir * ped.speed * dt;
+      if (ped.x < ped.min) { ped.x = ped.min; ped.dir = 1; }
+      if (ped.x > ped.max) { ped.x = ped.max; ped.dir = -1; }
+      ped.anim += ped.speed * dt;
+    }
 
-    // Body box: 8 wide, 22 tall, standing on the pavement
+    // Body box: 8 wide, 22 tall, standing on the pavement or a balcony
     const bx = ped.x + 2;
-    const by = GROUND_Y - 22;
+    const by = floor - 22;
     const px0 = p.x + p.ox;
     const py1 = p.y + p.oy + p.h;
-    if (px0 < bx + 8 && px0 + p.w > bx && py1 > by && p.y + p.oy < GROUND_Y) {
+    // People up on a balcony only count when you are on that balcony (or come down
+    // on their head); jumping up through the balcony from below passes them by.
+    const fromBelow = floor < GROUND_Y && py1 > floor + 2;
+    if (!fromBelow && px0 < bx + 8 && px0 + p.w > bx && py1 > by && p.y + p.oy < floor) {
       if (p.vy > 0 && py1 - p.vy / 60 <= by + 4) {
         // Landed on their head: bounce off
         p.vy = -PHYS.jumpSpeed * 0.8;
@@ -1479,14 +1525,15 @@ function render() {
   for (const ped of pedestrians) {
     const x = Math.round(ped.x) - cx;
     if (x < -14 || x > VIEW_W + 2) continue;
-    const img = PEDESTRIAN[ped.look][Math.floor(ped.anim / 6) % 2];
+    const img = PEDESTRIAN[ped.look][ped.still ? 0 : Math.floor(ped.anim / 6) % 2];
+    const top = (ped.floor || GROUND_Y) - 22;
     if (ped.dir < 0) {
       ctx.save();
       ctx.scale(-1, 1);
-      ctx.drawImage(img, -x - 12, GROUND_Y - 22);
+      ctx.drawImage(img, -x - 12, top);
       ctx.restore();
     } else {
-      ctx.drawImage(img, x, GROUND_Y - 22);
+      ctx.drawImage(img, x, top);
     }
   }
 
