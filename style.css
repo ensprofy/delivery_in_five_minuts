@@ -55,17 +55,11 @@ canvas {
   pointer-events: none;
 }
 
-/* Control hint along the bottom, over the road */
-.hint {
-  position: absolute;
-  right: calc(var(--px) * 4);
-  bottom: calc(var(--px) * 3);
+/* Control hint on the title screen */
+.title .hint {
   font-size: calc(var(--px) * 3.5);
-  line-height: 1.4;
-  padding: 0 calc(var(--px) * 2);
-  background: rgba(26, 28, 44, 0.6);
-  text-shadow: var(--px) var(--px) 0 var(--outline);
-  pointer-events: none;
+  color: #c4e3f5;
+  opacity: 0.9;
 }
 
 /* Countdown, top centre */
@@ -83,13 +77,15 @@ canvas {
 .timer.hurry { color: var(--yellow); }
 .timer.panic { color: #ff5a4a; animation: blink 0.5s steps(1) infinite; }
 
-/* Distance left, under the thermometer */
+/* Metres left, just above the progress bar on the right */
 .dist {
   position: absolute;
-  left: calc(var(--px) * 3);
-  top: calc(var(--px) * 116);
+  right: calc(var(--px) * 4);
+  bottom: calc(var(--px) * 17);
   font-size: calc(var(--px) * 4);
   line-height: 1.4;
+  padding: 0 calc(var(--px) * 2);
+  background: rgba(26, 28, 44, 0.75);
   text-shadow: var(--px) var(--px) 0 var(--outline);
   pointer-events: none;
 }

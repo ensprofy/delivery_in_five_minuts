@@ -223,3 +223,78 @@ const COURIER = {
   land: frame(TOP, LEGS.crouch, 2),
   skid: frame(buildTop(HEAD, ARMS.forward, 1), LEGS.skid),
 };
+// ---------- Pedestrians ----------
+// 12x22, facing right. Letters: K outline, S skin, H hair, C coat, c coat shade,
+// L legs, F shoes. Each look swaps the colours.
+const PED_TOP = [
+  '....KKKK....',
+  '...KHHHHK...',
+  '..KHHHHHHK..',
+  '..KHSSSSSK..',
+  '..KHSKSSSK..',
+  '..KSSSSSSK..',
+  '...KSSSSK...',
+  '...KKSSKK...',
+  '..KCCCCCCK..',
+  '.KCCCCCCCCK.',
+  '.KCcCCCCCcK.',
+  '.KCcCCCCCcK.',
+  '.KScCCCCCSK.',
+  '..KCCCCCCK..',
+];
+const PED_LEGS = [
+  [
+    '...KLLLLK...',
+    '...KLLKLK...',
+    '...KLLKLK...',
+    '...KLLKLK...',
+    '...KLLKLK...',
+    '...KLLKLK...',
+    '..KFFKKFFK..',
+    '..KKKK.KKK..',
+  ],
+  [
+    '...KLLLLK...',
+    '..KLLKKLLK..',
+    '..KLK..KLK..',
+    '.KLLK..KLLK.',
+    '.KLK....KLK.',
+    '.KLK....KLK.',
+    'KFFK....KFFK',
+    'KKKK....KKKK',
+  ],
+];
+const PED_LOOKS = [
+  { H: '#2b1d14', C: '#3e9b4f', c: '#2c7039', L: '#333c57', F: '#1a1c2c' },
+  { H: '#d9a441', C: '#9a6fa5', c: '#77517f', L: '#5d6478', F: '#5a3a22' },
+  { H: '#8e8e9a', C: '#c77d4e', c: '#9e5e37', L: '#29366f', F: '#1a1c2c' },
+  { H: '#5a3a22', C: '#f4f4f4', c: '#c1c7d4', L: '#1a1c2c', F: '#d23c3c' },
+];
+
+function pedFrame(legs, look) {
+  const c = document.createElement('canvas');
+  c.width = 12;
+  c.height = 22;
+  const g = c.getContext('2d');
+  [...PED_TOP, ...legs].forEach((row, y) => {
+    [...row].forEach((ch, x) => {
+      if (ch === '.') return;
+      g.fillStyle = look[ch] || PALETTE[ch];
+      g.fillRect(x, y, 1, 1);
+    });
+  });
+  return c;
+}
+
+// PEDESTRIAN[look][frame]
+const PEDESTRIAN = PED_LOOKS.map((look) => PED_LEGS.map((legs) => pedFrame(legs, look)));
+
+// The courier's face for the progress bar: the head, cropped.
+const COURIER_FACE = (() => {
+  const rows = HEAD.slice(1).map((r) => r.slice(2, 16));
+  const c = document.createElement('canvas');
+  c.width = 14;
+  c.height = rows.length;
+  paint(c.getContext('2d'), rows, 0);
+  return c;
+})();

@@ -2,7 +2,7 @@
 
 const VIEW_W = 320;
 const VIEW_H = 180;
-const WORLD_W = 16000;     // about 1 km of street
+const WORLD_W = 20800;     // 1.3 km of street
 const PX_PER_METRE = 16;
 const GROUND_Y = 152;
 const STEP = 1 / 60;
@@ -52,36 +52,80 @@ const awningList = [
   [880, 108, 64], [1050, 92, 48],
 ];
 
+// Holes in the street, people walking about, puddles that slow you down.
+const pits = [];        // { x, w }
+const pedestrians = []; // { x, min, max, dir, speed, look, anim }
+const puddles = [];     // { x, w }
+
 (function generateObstacles() {
   const r = rng(2024);
-  // Crate patterns as [dx, height in crates] columns. Nothing is taller than a
-  // jump unless there is a step in front of it.
-  const PATTERNS = [
-    [[0, 1]],
-    [[0, 1], [16, 1]],
-    [[0, 2]],
-    [[0, 1], [16, 2]],
-    [[0, 1], [16, 2], [32, 3]],
-    [[0, 2], [16, 1]],
-    [[0, 1], [16, 2], [32, 2], [48, 1]],
+  const pick = (list) => list[Math.floor(r() * list.length)];
+  // Crate patterns as [dx, height in crates]. Taller ones always have steps.
+  const EASY = [
+    [[0, 1]], [[0, 1], [16, 1]], [[0, 2]], [[0, 1], [16, 2]], [[0, 2], [16, 1]],
   ];
-  let x = 1300;
-  while (x < DEST.x - 260) {
-    const pattern = PATTERNS[Math.floor(r() * PATTERNS.length)];
-    for (const [dx, h] of pattern) {
-      for (let k = 0; k < h; k++) crateList.push([x + dx, 136 - k * 16]);
+  const HARD = [
+    [[0, 1], [16, 2], [32, 3]],
+    [[0, 1], [16, 2], [32, 3], [48, 2], [64, 1]],
+    [[0, 2], [16, 2], [32, 2]],
+    [[0, 1], [16, 2], [32, 3], [48, 4]],      // tall wall with a staircase
+    [[0, 2], [16, 3], [32, 1]],
+  ];
+  const START = 1300;
+  const END = DEST.x - 300;
+  let x = START;
+  while (x < END) {
+    const d = (x - START) / (END - START); // difficulty 0 → 1 along the street
+    const roll = r();
+    let width;
+    if (roll < 0.22 + d * 0.1) {
+      // Pit: 32 px early on, up to 48 px later (a full-speed jump clears about 54)
+      width = 32 + Math.floor(r() * (1 + d * 1.99)) * 8;
+      pits.push({ x, w: width });
+      if (r() < 0.35) awningList.push([x - 8, 96 + Math.floor(r() * 2) * 10, width + 16]);
+    } else if (roll < 0.40 + d * 0.12) {
+      // Pedestrian strolling back and forth
+      width = 90 + Math.floor(r() * 60);
+      pedestrians.push({
+        x: x + r() * width, min: x, max: x + width, dir: r() < 0.5 ? -1 : 1,
+        speed: 22 + r() * (14 + d * 22), look: Math.floor(r() * 4), anim: 0,
+      });
+    } else if (roll < 0.50) {
+      // Puddle
+      width = 40 + Math.floor(r() * 4) * 8;
+      puddles.push({ x, w: width });
+    } else {
+      // Crates, harder patterns more likely later on
+      const pattern = r() < 0.15 + d * 0.6 ? pick(HARD) : pick(EASY);
+      for (const [dx, h] of pattern) {
+        for (let k = 0; k < h; k++) crateList.push([x + dx, 136 - k * 16]);
+      }
+      width = pattern[pattern.length - 1][0] + 16;
+      if (r() < 0.35) {
+        const aw = 48 + Math.floor(r() * 3) * 16;
+        awningList.push([x + width + 24 + Math.floor(r() * 40), 88 + Math.floor(r() * 3) * 10, aw]);
+      }
+      // Later on, a pit often waits right behind a crate pile
+      if (d > 0.35 && r() < d * 0.5) {
+        const pw = 32 + Math.floor(r() * 2) * 8;
+        pits.push({ x: x + width + 56, w: pw });
+        width += 56 + pw;
+      }
     }
-    const width = pattern[pattern.length - 1][0] + 16;
-    // Sometimes an awning to run along above the crates
-    if (r() < 0.45) {
-      const aw = 48 + Math.floor(r() * 3) * 16;
-      awningList.push([x + width + 24 + Math.floor(r() * 40), 88 + Math.floor(r() * 3) * 10, aw]);
-    }
-    x += width + 120 + Math.floor(r() * 160);
+    x += width + Math.max(70, 150 - d * 70) + Math.floor(r() * 120);
   }
 })();
 
-const solids = [{ x: -16, y: GROUND_Y, w: WORLD_W + 32, h: 64 }];
+// The ground is split into pieces around the pits.
+const solids = [];
+{
+  let gx = -16;
+  for (const pit of pits) {
+    solids.push({ x: gx, y: GROUND_Y, w: pit.x - gx, h: 64 });
+    gx = pit.x + pit.w;
+  }
+  solids.push({ x: gx, y: GROUND_Y, w: WORLD_W + 16 - gx, h: 64 });
+}
 const crates = crateList.map(([x, y]) => ({ x, y, w: 16, h: 16 }));
 solids.push(...crates);
 // World edges
@@ -401,6 +445,37 @@ const street = layer(WORLD_W, VIEW_H, (g) => {
   g.fillRect(0, GROUND_Y + 13, WORLD_W, VIEW_H - GROUND_Y - 13);
   g.fillStyle = '#f7d51d';
   for (let lx = 8; lx < WORLD_W; lx += 32) g.fillRect(lx, GROUND_Y + 21, 14, 2);
+
+  // Pits: an open hole through the pavement, with striped barriers at the edges
+  for (const pit of pits) {
+    g.fillStyle = '#12131f';
+    g.fillRect(pit.x, GROUND_Y, pit.w, VIEW_H - GROUND_Y);
+    g.fillStyle = '#3a2a22';
+    g.fillRect(pit.x, GROUND_Y, 2, VIEW_H - GROUND_Y);
+    g.fillRect(pit.x + pit.w - 2, GROUND_Y, 2, VIEW_H - GROUND_Y);
+    g.fillStyle = '#5a3a22';
+    g.fillRect(pit.x, GROUND_Y, pit.w, 3);
+    for (const bx of [pit.x - 7, pit.x + pit.w + 1]) {
+      g.fillStyle = '#1a1c2c';
+      g.fillRect(bx - 1, GROUND_Y - 13, 8, 13);
+      g.fillStyle = '#f47b20';
+      g.fillRect(bx, GROUND_Y - 12, 6, 12);
+      g.fillStyle = '#f4f4f4';
+      g.fillRect(bx, GROUND_Y - 9, 6, 2);
+      g.fillRect(bx, GROUND_Y - 4, 6, 2);
+    }
+  }
+
+  // Puddles on the pavement
+  for (const pd of puddles) {
+    g.fillStyle = '#1a1c2c';
+    g.fillRect(pd.x + 2, GROUND_Y - 1, pd.w - 4, 1);
+    g.fillRect(pd.x, GROUND_Y, pd.w, 4);
+    g.fillStyle = '#4f86c6';
+    g.fillRect(pd.x + 1, GROUND_Y, pd.w - 2, 3);
+    g.fillStyle = '#a9d2ef';
+    for (let i = pd.x + 4; i < pd.x + pd.w - 6; i += 11) g.fillRect(i, GROUND_Y + 1, 4, 1);
+  }
 });
 
 const crateImg = layer(16, 16, (g) => {
@@ -510,6 +585,8 @@ const player = {
   skidding: false,
   skidTime: 0,   // seconds left on the braking pose
   lastPose: -1,  // walk pose on the previous step, for footstep timing
+  stun: 0,       // seconds without control after bumping into someone
+  invuln: 0,     // seconds of blinking safety after a bump or fall
 };
 
 let clock = 0;
@@ -530,7 +607,15 @@ function puff(x, y, n) {
 function update(dt) {
   clock += dt;
   const p = player;
-  const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+  p.stun = Math.max(0, p.stun - dt);
+  p.invuln = Math.max(0, p.invuln - dt);
+  const dir = p.stun > 0 ? 0 : (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+
+  // Puddles: slippery and slow
+  const feetX = p.x + 9;
+  const inPuddle = p.grounded && puddles.some((pd) => feetX > pd.x && feetX < pd.x + pd.w);
+  const maxSpeed = inPuddle ? PHYS.maxSpeed * 0.5 : PHYS.maxSpeed;
+  if (inPuddle && Math.abs(p.vx) > 20 && Math.random() < 0.5) splash(feetX, GROUND_Y);
 
   // Braking hard against your own momentum
   if (p.grounded && dir !== 0 && Math.sign(p.vx) === -dir && Math.abs(p.vx) > 60 && p.skidTime <= 0) {
@@ -544,7 +629,7 @@ function update(dt) {
   // Horizontal speed
   if (dir) {
     p.vx += dir * (p.grounded ? PHYS.accel : PHYS.airAccel) * dt;
-    p.vx = Math.max(-PHYS.maxSpeed, Math.min(PHYS.maxSpeed, p.vx));
+    p.vx = Math.max(-maxSpeed, Math.min(maxSpeed, p.vx));
     p.facing = dir;
   } else if (p.grounded) {
     const f = PHYS.friction * dt;
@@ -554,7 +639,7 @@ function update(dt) {
   // Jump with coyote time and input buffering
   p.sinceGround = p.grounded ? 0 : p.sinceGround + dt;
   const wantsJump = jumpPressedAt >= 0 && clock - jumpPressedAt <= PHYS.buffer;
-  if (wantsJump && p.sinceGround <= PHYS.coyote) {
+  if (wantsJump && p.sinceGround <= PHYS.coyote && p.stun <= 0) {
     p.vy = -PHYS.jumpSpeed;
     p.grounded = false;
     p.sinceGround = PHYS.coyote + 1;
@@ -562,7 +647,8 @@ function update(dt) {
     puff(p.x + 9, p.y + 24, 4);
     Sound.jump();
   }
-  if (!keys.jump && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
+  if (p.vy >= 0) p.bounced = false;
+  if (!keys.jump && !p.bounced && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
 
   p.vy = Math.min(PHYS.maxFall, p.vy + PHYS.gravity * dt);
 
@@ -607,6 +693,9 @@ function update(dt) {
   }
   p.landTime = Math.max(0, p.landTime - dt);
 
+  updatePedestrians(dt);
+  if (p.y > VIEW_H + 16) fellInPit();
+
   // Walk cycle advances with distance, so faster steps at full speed
   p.animTime = p.grounded && Math.abs(p.vx) > 5 ? p.animTime + Math.abs(p.vx) * dt : 0;
 
@@ -635,6 +724,63 @@ function update(dt) {
     d.y += d.vy * dt;
     if (d.life <= 0) dust.splice(i, 1);
   }
+}
+
+// ---------- Hazards ----------
+
+function splash(x, y) {
+  dust.push({ x: x + (Math.random() * 6 - 3), y, vx: (Math.random() - 0.5) * 50, vy: -20 - Math.random() * 40, life: 0.35, color: '#a9d2ef' });
+}
+
+function updatePedestrians(dt) {
+  const p = player;
+  for (const ped of pedestrians) {
+    ped.x += ped.dir * ped.speed * dt;
+    if (ped.x < ped.min) { ped.x = ped.min; ped.dir = 1; }
+    if (ped.x > ped.max) { ped.x = ped.max; ped.dir = -1; }
+    ped.anim += ped.speed * dt;
+
+    // Body box: 8 wide, 22 tall, standing on the pavement
+    const bx = ped.x + 2;
+    const by = GROUND_Y - 22;
+    const px0 = p.x + p.ox;
+    const py1 = p.y + p.oy + p.h;
+    if (px0 < bx + 8 && px0 + p.w > bx && py1 > by && p.y + p.oy < GROUND_Y) {
+      if (p.vy > 0 && py1 - p.vy / 60 <= by + 4) {
+        // Landed on their head: bounce off
+        p.vy = -PHYS.jumpSpeed * 0.8;
+        p.bounced = true; // a full bounce, even without holding jump
+        p.y = by - p.oy - p.h;
+        ped.dir *= -1;
+        beep(600, 900, 0.08, 'square', 0.06);
+      } else if (p.invuln <= 0) {
+        // Bumped into them: knocked back and dazed for a moment
+        const away = Math.sign(p.x + 9 - (bx + 4)) || -p.facing;
+        p.vx = away * 160;
+        p.vy = -150;
+        p.grounded = false;
+        p.stun = 0.45;
+        p.invuln = 1.2;
+        beep(220, 110, 0.18, 'square', 0.07);
+        toast('ОЙ!');
+      }
+    }
+  }
+}
+
+// Fell into a hole: back on the pavement just before it, five seconds lost.
+function fellInPit() {
+  const p = player;
+  const pit = pits.find((pt) => p.x + 9 > pt.x - 20 && p.x + 9 < pt.x + pt.w + 20) || pits[0];
+  const x = pit.x - 72; // enough run-up to jump it
+  // If crates stand there, put the courier on top of them
+  const under = crates.filter((c) => x + p.ox < c.x + c.w && x + p.ox + p.w > c.x);
+  const groundTop = under.length ? Math.min(...under.map((c) => c.y)) : GROUND_Y;
+  Object.assign(p, { x, y: groundTop - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0, stun: 0.3, invuln: 1.2 });
+  timeLeft = Math.max(0, timeLeft - 5);
+  puff(p.x + 9, p.y + 24, 8);
+  beep(500, 120, 0.35, 'square', 0.06);
+  toast('−5 СЕКУНД');
 }
 
 // ---------- Checkpoint ----------
@@ -809,7 +955,7 @@ function updateHud() {
   distEl.textContent = `${Math.ceil(distanceLeft() / PX_PER_METRE)} м`;
 }
 
-// Mercury colour: cold blue far away, through yellow, to hot red at the door.
+// Fill colour: cold blue far away, through yellow, to hot red at the door.
 function heat(p) {
   const stops = [[59, 93, 201], [247, 213, 29], [255, 90, 74]];
   const k = p < 0.5 ? p * 2 : (p - 0.5) * 2;
@@ -817,53 +963,50 @@ function heat(p) {
   return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`;
 }
 
-// Thermometer on the left: fills up and warms as the courier nears the house.
-function drawThermometer() {
+// Block progress bar along the bottom: the courier's face rides along it,
+// the blocks behind him fill up (cold blue → hot red), the house waits at the end.
+const BAR = { x: 12, y: 170, blocks: 30, size: 8, gap: 1 };
+BAR.w = BAR.blocks * (BAR.size + BAR.gap) - BAR.gap;
+
+function drawProgressBar() {
   const p = progress();
-  const x = 8;
-  const top = 30;
-  const bottom = 100;
-  const color = heat(p);
-  // Dark backing so the gauge reads on any building
-  ctx.fillStyle = 'rgba(26,28,44,0.5)';
-  ctx.fillRect(1, 10, 36, 114);
-  // House icon at the top: the goal
-  ctx.fillStyle = '#1a1c2c';
-  ctx.fillRect(x - 3, 19, 13, 9);
-  ctx.fillRect(x - 1, 15, 9, 4);
-  ctx.fillRect(x + 1, 13, 5, 2);
-  ctx.fillStyle = '#8e2434';
-  ctx.fillRect(x - 2, 19, 11, 2);
-  ctx.fillRect(x, 16, 7, 3);
-  ctx.fillStyle = '#7cc0c8';
-  ctx.fillRect(x - 2, 21, 11, 6);
-  ctx.fillStyle = '#3b5dc9';
-  ctx.fillRect(x + 2, 23, 3, 4);
-  // Glass tube and bulb
-  ctx.fillStyle = '#1a1c2c';
-  ctx.fillRect(x - 1, top - 1, 9, bottom - top + 2);
-  ctx.fillRect(x - 3, bottom, 13, 11);
-  ctx.fillRect(x - 2, bottom + 11, 11, 2);
-  ctx.fillStyle = '#dfe7f1';
-  ctx.fillRect(x, top, 7, bottom - top + 1);
-  ctx.fillRect(x - 2, bottom + 1, 11, 9);
-  ctx.fillRect(x - 1, bottom + 10, 9, 2);
-  // Scale marks every 10%
-  ctx.fillStyle = '#1a1c2c';
-  for (let i = 1; i < 10; i++) {
-    const y = Math.round(bottom - (bottom - top) * (i / 10));
-    ctx.fillRect(x + 8, y, i % 5 ? 2 : 4, 1);
+  const { x, y, blocks, size, gap, w } = BAR;
+  // Backing strip
+  ctx.fillStyle = 'rgba(26,28,44,0.75)';
+  ctx.fillRect(x - 6, y - 7, w + 30, 15);
+  // Blocks
+  const filled = p * blocks;
+  for (let i = 0; i < blocks; i++) {
+    const bx = x + i * (size + gap);
+    ctx.fillStyle = '#1a1c2c';
+    ctx.fillRect(bx - 1, y - 1, size + 2, 8);
+    let color = '#2f3350';
+    if (i < Math.floor(filled)) color = heat(i / (blocks - 1));
+    else if (i < filled && Math.floor(clock * 6) % 2) color = heat(i / (blocks - 1)); // the block being filled blinks
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, y, size, 6);
+    if (color !== '#2f3350') {
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fillRect(bx, y, size, 1);
+    }
   }
-  // Mercury
-  const level = Math.round(bottom - (bottom - top - 2) * p);
-  const glow = p > 0.9 && Math.floor(clock * 6) % 2;
-  ctx.fillStyle = glow ? '#ffc4b8' : color; // pulses when the house is close
-  ctx.fillRect(x + 2, level, 3, bottom - level + 2);
-  ctx.fillStyle = color;
-  ctx.fillRect(x - 1, bottom + 2, 9, 7);
-  ctx.fillRect(x, bottom + 9, 7, 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fillRect(x, bottom + 3, 2, 3); // shine on the bulb
+  // House at the end
+  const hx = x + w + 5;
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(hx - 1, y - 2, 13, 9);
+  ctx.fillRect(hx + 1, y - 6, 9, 4);
+  ctx.fillRect(hx + 3, y - 8, 5, 2);
+  ctx.fillStyle = '#8e2434';
+  ctx.fillRect(hx, y - 2, 11, 2);
+  ctx.fillRect(hx + 2, y - 5, 7, 3);
+  ctx.fillStyle = '#7cc0c8';
+  ctx.fillRect(hx, y, 11, 6);
+  ctx.fillStyle = '#3b5dc9';
+  ctx.fillRect(hx + 4, y + 2, 3, 4);
+  // The courier's face at the tip, bobbing while he runs
+  const fx = Math.round(x + p * (w - 1) - 7);
+  const bob = Math.abs(player.vx) > 5 && player.grounded ? Math.floor(clock * 10) % 2 : 0;
+  ctx.drawImage(COURIER_FACE, fx, y - 8 - bob);
 }
 
 // Bouncing arrow over the recipient's door
@@ -923,17 +1066,36 @@ function render() {
   drawFlag(cx);
   if (!finished) drawDoorArrow(cx);
 
-  ctx.fillStyle = '#d6dbe4';
-  for (const d of dust) ctx.fillRect(Math.round(d.x - cx), Math.round(d.y), 2, 2);
+  for (const d of dust) {
+    ctx.fillStyle = d.color || '#d6dbe4';
+    ctx.fillRect(Math.round(d.x - cx), Math.round(d.y), 2, 2);
+  }
+
+  for (const ped of pedestrians) {
+    const x = Math.round(ped.x) - cx;
+    if (x < -14 || x > VIEW_W + 2) continue;
+    const img = PEDESTRIAN[ped.look][Math.floor(ped.anim / 6) % 2];
+    if (ped.dir < 0) {
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, -x - 12, GROUND_Y - 22);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, x, GROUND_Y - 22);
+    }
+  }
 
   // Shadow on the ground under the courier
   ctx.fillStyle = 'rgba(26,28,44,0.35)';
   ctx.fillRect(Math.round(player.x - cx) + 4, GROUND_Y, 10, 2);
 
+  const blinkOut = player.invuln > 0 && Math.floor(clock * 16) % 2;
   const img = courierFrame();
   const px = Math.round(player.x) - cx;
   const py = Math.round(player.y);
-  if (player.facing < 0) {
+  if (blinkOut) {
+    // skip a frame: blinking after a bump
+  } else if (player.facing < 0) {
     ctx.save();
     ctx.scale(-1, 1);
     ctx.drawImage(img, -px - img.width, py);
@@ -952,7 +1114,7 @@ function render() {
     ctx.fillRect(Math.round(c.x - cx), Math.round(c.y), 2, 2);
   }
 
-  drawThermometer();
+  drawProgressBar();
 }
 
 // ---------- Loop and scaling ----------
