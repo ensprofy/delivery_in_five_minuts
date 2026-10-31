@@ -11,14 +11,17 @@ const PALETTE = {
   W: '#f4f4f4', // white (cap logo)
   B: '#3b5dc9', // near leg
   b: '#29366f', // far leg, darker so the two legs read apart
-  G: '#333c57', // shoes
-  Y: '#e2a95c', // pizza box
-  y: '#a8703c', // pizza box shade
-  P: '#f7d51d', // box logo
+  G: '#333c57', // shoes and backpack strap
+  Y: '#f7a41d', // pizza backpack
+  y: '#c06f12', // backpack shade
+  P: '#d23c3c', // backpack logo
 };
 
-// Upper body, 16x16, holding the pizza box.
-const TOP = [
+// Frames are 18 px wide: 2 px on the left for the backpack.
+const SPRITE_W = 18;
+
+// Head, rows 0-10.
+const HEAD = [
   '................',
   '.....KKKKK......',
   '....KRRRRRK.....',
@@ -30,18 +33,62 @@ const TOP = [
   '...KSSSSSSSSK...',
   '....KSSSSSsK....',
   '.....KKsSKK.....',
-  '....KRRRRKKKKKKK',
-  '...KRRRRRKYYPYYK',
-  '...KRRRRSKyyyyyK',
-  '...KrRRRRKKKKKKK',
-  '...KrRRRRRK.....',
+];
+const HEAD_BLINK = HEAD.map((row, i) => (i === 7 ? '...KHSSSsSSK....' : row));
+
+// Torso, rows 11-15, with the backpack strap across the chest and the free arm.
+const ARMS = {
+  mid: [
+    '....KGRRRRK.....',
+    '...KRRGRRrK.....',
+    '...KRRRGRrK.....',
+    '...KRRRRRSK.....',
+    '...KrRRRRRK.....',
+  ],
+  forward: [
+    '....KGRRRRK.....',
+    '...KRRGRRrK.....',
+    '...KRRRGRRrK....',
+    '...KRRRRRKSK....',
+    '...KrRRRRRK.....',
+  ],
+  back: [
+    '....KGRRRRK.....',
+    '...KRRGrRRK.....',
+    '...KRRrGRRK.....',
+    '...KRSRRRRK.....',
+    '...KrRRRRRK.....',
+  ],
+};
+
+// Insulated pizza backpack, columns 0-5 of rows 7-15. It sits behind the courier.
+const BAG = [
+  'KKKKKK',
+  'KYYYYK',
+  'KYPPYK',
+  'KYPPYK',
+  'KYYYYK',
+  'KYYYYK',
+  'KyyyyK',
+  'KyyyyK',
+  'KKKKKK',
 ];
 
-// Same, with the eye closed.
-const TOP_BLINK = TOP.map((row, i) => (i === 7 ? '...KHSSSsSSK....' : row));
+function buildTop(head, arms, lean = 0) {
+  const rows = [...head, ...arms].map((row) => '..' + row);
+  BAG.forEach((bagRow, i) => {
+    const r = rows[i + 7];
+    let out = '';
+    for (let x = 0; x < SPRITE_W; x++) {
+      const behind = x < bagRow.length ? bagRow[x] : '.';
+      out += r[x] !== '.' && x >= 5 ? r[x] : behind !== '.' ? behind : r[x];
+    }
+    rows[i + 7] = out;
+  });
+  return lean ? rows.map((row) => '.'.repeat(lean) + row.slice(0, SPRITE_W - lean)) : rows;
+}
 
-// Same, leaning back while braking.
-const TOP_SKID = TOP.map((row) => '.' + row.slice(0, 15));
+const TOP = buildTop(HEAD, ARMS.mid);
 
 // Legs, 16x8, drawn under the upper body.
 const LEGS = {
@@ -151,10 +198,10 @@ function paint(g, rows, oy) {
 // One 16x24 frame: legs at the bottom, upper body lowered by `bob` pixels.
 function frame(top, legs, bob = 0) {
   const c = document.createElement('canvas');
-  c.width = 16;
+  c.width = SPRITE_W;
   c.height = 24;
   const g = c.getContext('2d');
-  paint(g, legs, 16);
+  paint(g, legs.map((row) => '..' + row), 16);
   paint(g, top, bob);
   return c;
 }
@@ -162,16 +209,17 @@ function frame(top, legs, bob = 0) {
 const COURIER = {
   idle: frame(TOP, LEGS.stand),
   breathe: frame(TOP, LEGS.stand, 1),
-  blink: frame(TOP_BLINK, LEGS.stand),
-  // Body dips on the wide steps and rises as the legs pass.
+  blink: frame(buildTop(HEAD_BLINK, ARMS.mid), LEGS.stand),
+  // Body dips on the wide steps and rises as the legs pass; the arm swings
+  // opposite to the near leg.
   walk: [
-    frame(TOP, LEGS.contactA, 1),
+    frame(buildTop(HEAD, ARMS.back), LEGS.contactA, 1),
     frame(TOP, LEGS.passA),
-    frame(TOP, LEGS.contactB, 1),
+    frame(buildTop(HEAD, ARMS.forward), LEGS.contactB, 1),
     frame(TOP, LEGS.passB),
   ],
-  rise: frame(TOP, LEGS.rise),
-  fall: frame(TOP, LEGS.fall),
+  rise: frame(buildTop(HEAD, ARMS.forward), LEGS.rise),
+  fall: frame(buildTop(HEAD, ARMS.back), LEGS.fall),
   land: frame(TOP, LEGS.crouch, 2),
-  skid: frame(TOP_SKID, LEGS.skid),
+  skid: frame(buildTop(HEAD, ARMS.forward, 1), LEGS.skid),
 };

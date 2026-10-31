@@ -308,7 +308,7 @@ function start() {
 const player = {
   x: 40, y: GROUND_Y - 24,
   vx: 0, vy: 0,
-  w: 10, h: 22, ox: 3, oy: 2, // hitbox inside the 16x24 sprite
+  w: 10, h: 22, ox: 4, oy: 2, // hitbox inside the 18x24 sprite, centred on the body
   facing: 1,
   grounded: true,
   sinceGround: 0,
@@ -345,7 +345,7 @@ function update(dt) {
   }
   p.skidTime = p.grounded ? Math.max(0, p.skidTime - dt) : 0;
   p.skidding = p.skidTime > 0;
-  if (p.skidding && Math.random() < 0.6) puff(p.x + 8 + p.facing * 5, p.y + 24, 1);
+  if (p.skidding && Math.random() < 0.6) puff(p.x + 9 + p.facing * 5, p.y + 24, 1);
 
   // Horizontal speed
   if (dir) {
@@ -365,7 +365,7 @@ function update(dt) {
     p.grounded = false;
     p.sinceGround = PHYS.coyote + 1;
     jumpPressedAt = -1;
-    puff(p.x + 8, p.y + 24, 4);
+    puff(p.x + 9, p.y + 24, 4);
     beep(300, 700, 0.15);
   }
   if (!keys.jump && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
@@ -407,7 +407,7 @@ function update(dt) {
   p.y = ny;
 
   if (p.grounded && !wasGrounded && fallSpeed > 120) {
-    puff(p.x + 8, p.y + 24, 6);
+    puff(p.x + 9, p.y + 24, 6);
     beep(160, 80, 0.08, 'triangle', 0.08);
     p.landTime = fallSpeed > 250 ? 0.14 : 0.09;
   }
@@ -416,10 +416,10 @@ function update(dt) {
   // Walk cycle advances with distance, so faster steps at full speed
   p.animTime = p.grounded && Math.abs(p.vx) > 5 ? p.animTime + Math.abs(p.vx) * dt : 0;
 
-  // Steam from the hot pizza
+  // Steam from the hot pizza in the backpack
   if (Math.random() < dt * 3) {
-    const boxX = p.facing > 0 ? p.x + 12 : p.x + 2;
-    steam.push({ x: boxX + Math.random() * 3 - 1, y: p.y + 10, life: 0.8 + Math.random() * 0.4 });
+    const bagX = p.facing > 0 ? p.x + 2 : p.x + 13;
+    steam.push({ x: bagX + Math.random() * 3, y: p.y + 6, life: 0.8 + Math.random() * 0.4 });
   }
   for (let i = steam.length - 1; i >= 0; i--) {
     const s = steam[i];
@@ -458,7 +458,7 @@ function tiled(img, speed, y = 0) {
 }
 
 function render() {
-  const target = player.x + 8 - VIEW_W / 2 + player.facing * 24;
+  const target = player.x + 9 - VIEW_W / 2 + player.facing * 24;
   camX += (target - camX) * 0.1;
   camX = Math.max(0, Math.min(WORLD_W - VIEW_W, camX));
   const cx = Math.round(camX);
@@ -479,7 +479,7 @@ function render() {
 
   // Shadow on the ground under the courier
   ctx.fillStyle = 'rgba(26,28,44,0.35)';
-  ctx.fillRect(Math.round(player.x - cx) + 3, GROUND_Y, 10, 2);
+  ctx.fillRect(Math.round(player.x - cx) + 4, GROUND_Y, 10, 2);
 
   const img = courierFrame();
   const px = Math.round(player.x) - cx;
@@ -487,7 +487,7 @@ function render() {
   if (player.facing < 0) {
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.drawImage(img, -px - 16, py);
+    ctx.drawImage(img, -px - img.width, py);
     ctx.restore();
   } else {
     ctx.drawImage(img, px, py);
