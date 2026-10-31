@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Доставка за 5 минут</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="stage">
+    <div class="screen">
+      <canvas id="game" width="320" height="180"></canvas>
+
+      <div class="hud">
+        <span>ЭТАП 1</span>
+        <span class="hint">← → ходить · ПРОБЕЛ прыжок · M звук</span>
+      </div>
+
+      <div id="title" class="title">
+        <h1>ДОСТАВКА<br>ЗА 5 МИНУТ</h1>
+        <p class="blink">НАЖМИ ЛЮБУЮ КЛАВИШУ</p>
+      </div>
+    </div>
+  </main>
+
+  <div class="pad" aria-label="Управление">
+    <div class="pad-dir">
+      <button data-action="left" aria-label="Влево">◀</button>
+      <button data-action="right" aria-label="Вправо">▶</button>
+    </div>
+    <button class="pad-jump" data-action="jump" aria-label="Прыжок">A</button>
+  </div>
+
+  <script src="js/sprites.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
