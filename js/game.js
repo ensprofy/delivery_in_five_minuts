@@ -39,18 +39,22 @@ function rng(seed) {
 const DEST = { x: WORLD_W - 300, w: 176 };
 DEST.doorX = DEST.x + 120; // centre of the front door: the delivery spot
 
-// The first stretch is hand-made; after that obstacles are generated.
-const crateList = [
+// The first stretch is hand-made; after that obstacles are generated anew
+// for every run (see buildLevel).
+const HAND_CRATES = [
   [200, 136], [216, 136], [216, 120],
   [420, 136],
   [600, 136], [616, 136], [632, 136], [616, 120], [632, 120], [632, 104],
   [980, 136], [996, 136],
   [1140, 136], [1140, 120],
 ];
-const awningList = [
+const HAND_AWNINGS = [
   [296, 108, 48], [480, 100, 64], [700, 92, 48], [770, 66, 48],
   [880, 108, 64], [1050, 92, 48],
 ];
+
+const crateList = [];   // [x, y]
+const awningList = [];  // [x, y, w]
 
 // Holes in the street, people walking about, puddles that slow you down.
 const pits = [];        // { x, w }
@@ -59,8 +63,7 @@ const puddles = [];     // { x, w }
 const clockSpots = [];  // { x, y, gold }: where the bonus clocks hang
 const balconyList = []; // [x, y, w]
 
-(function generateObstacles() {
-  const r = rng(2024);
+function generateObstacles(r) {
   const pick = (list) => list[Math.floor(r() * list.length)];
   // Crate patterns as [dx, height in crates]. Taller ones always have steps.
   const EASY = [
@@ -74,7 +77,7 @@ const balconyList = []; // [x, y, w]
     [[0, 2], [16, 3], [32, 1]],
   ];
   const START = 1300;
-  const END = DEST.x - 300;
+  const END = DEST.x - 520; // a clear run-up to the recipient's door
 
   // A column of crates standing on the pavement; `sunk` adds crates below
   // street level so a pillar looks like it rises out of a pit.
@@ -92,8 +95,10 @@ const balconyList = []; // [x, y, w]
   // Wide enough that a full jump from the edge still lands on the next one.
   function pillars(x, d) {
     const n = 3 + Math.floor(r() * (2 + d * 2));
-    const gap = step4(32, 36 + Math.round(d * 12)); // stride ≥ a full jump, so landings never drift past the edge
     const h = 1 + Math.floor(r() * 2); // one height per section: stepping down overshoots
+    // Stride ≥ a full jump, so landings never drift past the edge; tall pillars
+    // get shorter gaps because the first hop has to climb two crates.
+    const gap = step4(32, h === 2 ? 40 : 36 + Math.round(d * 12));
     const w = gap + n * (32 + gap);
     pits.push({ x, w });
     for (let i = 0; i < n; i++) {
@@ -117,6 +122,13 @@ const balconyList = []; // [x, y, w]
       const aw = 32 + Math.floor(r() * 2) * 16;
       awningList.push([ax, 120, aw]);
       if (i === 1 && r() < 0.3) clock(ax + aw / 2, 104);
+      // An upper route: a balcony right above a wide awning, reached by jumping
+      // straight up from it, often with a clock. It stops short of the awning's
+      // end so that dropping off it still reaches the next awning.
+      if (i >= 1 && aw === 48 && r() < 0.6) {
+        balconyList.push([ax + 4, 88, 40]);
+        if (r() < 0.6) clock(ax + 24, 74);
+      }
       ax += aw;
     }
     ax += step4(24, 32);
@@ -137,16 +149,17 @@ const balconyList = []; // [x, y, w]
     return ax - x;
   }
 
-  // Climb a four-crate tower and leap off it over a pit.
+  // Climb a four-crate tower and leap off it over a pit (at most 56 px).
   function tower(x, d) {
     column(x, 1);
     column(x + 16, 2);
     column(x + 32, 3);
     column(x + 48, 4);
-    if (r() < 0.4) clock(x + 56, 74);
-    const pw = step4(40, 48 + Math.round(d * 16));
-    pits.push({ x: x + 64, w: pw });
-    return 64 + pw;
+    column(x + 64, 4); // a two-crate-wide top, so a full jump from the step lands on it
+    if (r() < 0.4) clock(x + 64, 74);
+    const pw = step4(40, 48 + Math.round(d * 8));
+    pits.push({ x: x + 80, w: pw });
+    return 80 + pw;
   }
 
   // Climb up the front of a building: a crate, an awning, a balcony with boxes
@@ -176,7 +189,8 @@ const balconyList = []; // [x, y, w]
     let width;
     if (roll < 0.14 + d * 0.22) {
       // Parkour section
-      width = pick([pillars, bridge, stairs, tower, balconies])(x, d);
+      // plus room to land: dropping off the last platform carries you ~80 px
+      width = pick([pillars, bridge, stairs, tower, balconies])(x, d) + 56;
     } else if (roll < 0.36 + d * 0.16) {
       // Pit: 32 px early on, up to 48 px later (a full-speed jump clears about 54)
       width = 32 + Math.floor(r() * (1 + d * 1.99)) * 8;
@@ -202,9 +216,12 @@ const balconyList = []; // [x, y, w]
       width = pattern[pattern.length - 1][0] + 16;
       const peak = pattern.reduce((a, b) => (b[1] > a[1] ? b : a));
       if (r() < 0.1) clock(x + peak[0] + 8, 136 - (peak[1] - 1) * 16 - 14);
+      let reach = width; // how far this piece extends, awning included
       if (r() < 0.35) {
         const aw = 48 + Math.floor(r() * 3) * 16;
-        awningList.push([x + width + 24 + Math.floor(r() * 40), 88 + Math.floor(r() * 3) * 10, aw]);
+        const ax = x + width + 24 + Math.floor(r() * 40);
+        awningList.push([ax, 88 + Math.floor(r() * 3) * 10, aw]);
+        reach = ax + aw - x;
       }
       // Later on, a pit often follows a crate pile
       const lastH = pattern[pattern.length - 1][1];
@@ -214,35 +231,55 @@ const balconyList = []; // [x, y, w]
         // Right behind a pile too tall to hop over from the ground, so the only way
         // across is a leap from its top; otherwise leave room to land before the pit.
         const gap = lastH === tallest && tallest >= 3 ? 0 : 88;
-        pits.push({ x: x + width + gap, w: pw });
-        width += gap + pw;
+        pits.push({ x: x + Math.max(width + gap, reach), w: pw });
+        width = Math.max(width + gap, reach) + pw + 56;
+      } else {
+        // Leaping off a tall pile carries you ~75 px: keep the next obstacle beyond that
+        width = Math.max(width + (tallest >= 2 ? 56 : 0), reach);
       }
     }
     // Less breathing room between obstacles the further you get
     x += width + Math.max(40, 100 - d * 50) + Math.floor(r() * 70);
   }
-})();
+}
 
-// The ground is split into pieces around the pits.
 const solids = [];
-{
+const crates = [];
+const awnings = [];
+let levelSeed = 0;
+
+// Lay out a fresh street from a seed: hand-made start, generated rest.
+function buildLevel(seed) {
+  levelSeed = seed;
+  for (const list of [crateList, awningList, pits, pedestrians, puddles, clockSpots, balconyList, solids, crates, awnings]) {
+    list.length = 0;
+  }
+  crateList.push(...HAND_CRATES.map((c) => [...c]));
+  awningList.push(...HAND_AWNINGS.map((a) => [...a]));
+  generateObstacles(rng(seed));
+
+  // The ground is split into pieces around the pits.
   let gx = -16;
   for (const pit of pits) {
     solids.push({ x: gx, y: GROUND_Y, w: pit.x - gx, h: 64 });
     gx = pit.x + pit.w;
   }
   solids.push({ x: gx, y: GROUND_Y, w: WORLD_W + 16 - gx, h: 64 });
-}
-// About a third of the boxes are cardboard, the rest wooden crates (a fixed shuffle).
-const crates = crateList.map(([x, y], i) => ({ x, y, w: 16, h: 16, card: ((i * 2654435761) >>> 0) % 100 < 35 }));
-solids.push(...crates);
-// World edges
-solids.push({ x: -16, y: -200, w: 16, h: 400 }, { x: WORLD_W, y: -200, w: 16, h: 400 });
+  // About a third of the boxes are cardboard, the rest wooden crates.
+  const shuffle = rng(seed ^ 0x5bd1e995);
+  for (const [x, y] of crateList) crates.push({ x, y, w: 16, h: 16, card: shuffle() < 0.35 });
+  solids.push(...crates);
+  // World edges
+  solids.push({ x: -16, y: -200, w: 16, h: 400 }, { x: WORLD_W, y: -200, w: 16, h: 400 });
 
-// Awnings: you can jump up through them and land on top.
-const awnings = awningList.map(([x, y, w]) => ({ x, y, w, h: 4 }));
-// Balconies work the same way (land on top, jump up through), they only look different.
-for (const [x, y, w] of balconyList) awnings.push({ x, y, w, h: 4, balcony: true });
+  // Awnings: you can jump up through them and land on top.
+  for (const [x, y, w] of awningList) awnings.push({ x, y, w, h: 4 });
+  // Balconies work the same way (land on top, jump up through), they only look different.
+  for (const [x, y, w] of balconyList) awnings.push({ x, y, w, h: 4, balcony: true });
+}
+
+const newSeed = () => Math.floor(Math.random() * 2 ** 31);
+buildLevel(newSeed());
 
 // ---------- Art ----------
 
@@ -499,9 +536,10 @@ function drawDestination(g) {
   g.fillRect(x + w - 26, 121, 11, 7);
 }
 
-// Street facades, drawn at full scroll speed behind the courier.
-const street = chunkedLayer(WORLD_W, VIEW_H, (g) => {
-  const r = rng(42);
+// Street facades, sidewalk, pits and puddles for the current level, drawn at
+// full scroll speed behind the courier.
+function paintStreet(g) {
+  const r = rng(levelSeed ^ 0x2545f491);
   const colors = [
     ['#b0533c', '#8a3d2c'], ['#c9a86a', '#a3854f'], ['#6b8f71', '#4f6e55'],
     ['#9a6fa5', '#77517f'], ['#c77d4e', '#9e5e37'],
@@ -512,7 +550,7 @@ const street = chunkedLayer(WORLD_W, VIEW_H, (g) => {
   ];
   drawPizzeria(g);
   let x = PIZZERIA.x + PIZZERIA.w;
-  let n = 0;
+  let n = Math.floor(r() * 30); // shops and colours start at a different point every run
   while (x < DEST.x) {
     let bw = 96 + Math.floor(r() * 48);
     if (DEST.x - x - bw < 96) bw = DEST.x - x; // last shop stretches to meet the house
@@ -615,7 +653,8 @@ const street = chunkedLayer(WORLD_W, VIEW_H, (g) => {
     g.fillStyle = '#a9d2ef';
     for (let i = pd.x + 4; i < pd.x + pd.w - 6; i += 11) g.fillRect(i, GROUND_Y + 1, 4, 1);
   }
-});
+}
+let street = chunkedLayer(WORLD_W, VIEW_H, paintStreet);
 
 // Box textures, drawn pixel by pixel from a 16x16 grid of colour letters.
 function gridImage(rows, colors) {
@@ -1111,7 +1150,12 @@ let finished = false;
 let lastWholeSecond = TIME_LIMIT;
 const confetti = [];
 
-const clocks = clockSpots.map((c) => ({ ...c, taken: false }));
+const clocks = [];
+function resetClocks() {
+  clocks.length = 0;
+  for (const c of clockSpots) clocks.push({ ...c, taken: false });
+}
+resetClocks();
 const floaters = []; // little "+5" texts that drift up
 let clocksTaken = 0;
 let bonusFlash = 0;
@@ -1187,7 +1231,7 @@ function updateRun(dt) {
     if (whole <= 10 && whole > 0) Sound.tick(whole <= 5);
   }
 
-  if (Math.abs(player.x + 9 - DEST.doorX) < 8 && player.grounded) finish(true);
+  if (Math.abs(player.x + 9 - DEST.doorX) < 12 && player.y + 24 > GROUND_Y - 40) finish(true);
   else if (timeLeft <= 0) finish(false);
 }
 
@@ -1224,7 +1268,10 @@ function restart() {
   timeLeft = TIME_LIMIT;
   lastWholeSecond = TIME_LIMIT;
   confetti.length = 0;
-  for (const c of clocks) c.taken = false;
+  // A brand-new street every run
+  buildLevel(newSeed());
+  street = chunkedLayer(WORLD_W, VIEW_H, paintStreet);
+  resetClocks();
   clocksTaken = 0;
   floaters.length = 0;
   Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
