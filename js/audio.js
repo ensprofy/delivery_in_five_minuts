@@ -8,10 +8,12 @@ const Sound = (() => {
   let pulse25 = null;
   let muted = false;
   let musicOn = true;
+  const MUSIC_VOL = 0.9;
 
   function init() {
     if (ctx) return true;
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return false; }
+    if (ctx.state === 'suspended') ctx.resume();
     master = ctx.createGain();
     master.gain.value = muted ? 0 : 1;
     master.connect(ctx.destination);
@@ -19,7 +21,7 @@ const Sound = (() => {
     sfxBus.gain.value = 1;
     sfxBus.connect(master);
     musicBus = ctx.createGain();
-    musicBus.gain.value = musicOn ? 0.55 : 0;
+    musicBus.gain.value = musicOn ? MUSIC_VOL : 0;
     musicBus.connect(master);
 
     // One second of white noise, reused for steps and drums
@@ -76,8 +78,8 @@ const Sound = (() => {
     const t = ctx.currentTime;
     stepFoot ^= 1;
     // A soft scuff of noise plus a tiny low knock; the two feet differ slightly.
-    hiss(t, 0.05, 0.12, sfxBus, 'lowpass', stepFoot ? 1400 : 1100);
-    osc('triangle', stepFoot ? 150 : 130, t, 0.05, 0.1, sfxBus, 70);
+    hiss(t, 0.06, 0.6, sfxBus, 'bandpass', stepFoot ? 2600 : 2100);
+    osc('square', stepFoot ? 420 : 360, t, 0.035, 0.08, sfxBus, 180);
   }
 
   function jump() {
@@ -92,8 +94,8 @@ const Sound = (() => {
   function land(hard) {
     if (!init() || muted) return;
     const t = ctx.currentTime;
-    osc('triangle', hard ? 180 : 150, t, 0.09, 0.12, sfxBus, 60);
-    hiss(t, hard ? 0.09 : 0.06, hard ? 0.16 : 0.1, sfxBus, 'lowpass', 900);
+    osc('square', hard ? 300 : 260, t, 0.08, 0.06, sfxBus, 90);
+    hiss(t, hard ? 0.1 : 0.07, hard ? 0.4 : 0.28, sfxBus, 'bandpass', 1600);
   }
 
   // ---------- Music ----------
@@ -138,16 +140,16 @@ const Sound = (() => {
   function playStep(i, t) {
     const lead = LEAD[i];
     if (lead !== '.' && lead !== '-') {
-      osc('pulse', freq(lead), t, noteLength(i) * EIGHTH * 0.95, 0.05, musicBus);
+      osc('pulse', freq(lead), t, noteLength(i) * EIGHTH * 0.95, 0.09, musicBus);
     }
     const bar = Math.floor(i / 8);
     const beat = i % 8;
-    const root = freq(ROOTS[bar]);
-    osc('triangle', beat % 2 ? root * 2 : root, t, EIGHTH * 0.9, 0.14, musicBus);
+    const root = freq(ROOTS[bar]) * 2; // up an octave so small speakers can play it
+    osc('triangle', beat % 2 ? root * 2 : root, t, EIGHTH * 0.9, 0.2, musicBus);
 
-    if (beat === 0 || beat === 4) osc('sine', 150, t, 0.12, 0.25, musicBus, 45);       // kick
-    if (beat === 2 || beat === 6) hiss(t, 0.1, 0.12, musicBus, 'bandpass', 1800);    // snare
-    hiss(t + EIGHTH / 2, 0.025, 0.04, musicBus, 'highpass', 7000);                    // hi-hat
+    if (beat === 0 || beat === 4) osc('square', 220, t, 0.08, 0.08, musicBus, 60);     // kick
+    if (beat === 2 || beat === 6) hiss(t, 0.1, 0.3, musicBus, 'bandpass', 2200);     // snare
+    hiss(t + EIGHTH / 2, 0.03, 0.12, musicBus, 'highpass', 6000);                    // hi-hat
   }
 
   // Schedules notes a little ahead of time, so the beat stays steady even if a frame is slow.
@@ -176,7 +178,7 @@ const Sound = (() => {
 
   function setMusic(on) {
     musicOn = on;
-    if (ctx) musicBus.gain.setTargetAtTime(on ? 0.55 : 0, ctx.currentTime, 0.05);
+    if (ctx) musicBus.gain.setTargetAtTime(on ? MUSIC_VOL : 0, ctx.currentTime, 0.05);
   }
 
   // Pause everything while the tab is in the background
