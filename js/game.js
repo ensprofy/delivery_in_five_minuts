@@ -73,46 +73,124 @@ const puddles = [];     // { x, w }
   ];
   const START = 1300;
   const END = DEST.x - 300;
+
+  // A column of crates standing on the pavement; `sunk` adds crates below
+  // street level so a pillar looks like it rises out of a pit.
+  function column(x, h, sunk = 0) {
+    for (let k = -sunk; k < h; k++) crateList.push([x, 136 - k * 16]);
+  }
+  const step4 = (lo, hi) => lo + Math.floor(r() * ((hi - lo) / 4 + 1)) * 4; // random multiple of 4
+
+  // ----- Parkour pieces. Each returns its width. Jump sizes are kept inside
+  // what the courier can do: about 64 px across on the level, ~50 px when
+  // jumping up two crates.
+
+  // Two-crate-wide pillars rising out of a long pit: hop from one to the next.
+  // Wide enough that a full jump from the edge still lands on the next one.
+  function pillars(x, d) {
+    const n = 3 + Math.floor(r() * (2 + d * 2));
+    const gap = step4(28, 32 + Math.round(d * 12));
+    let h = 1 + Math.floor(r() * 2);
+    const w = gap + n * (32 + gap);
+    pits.push({ x, w });
+    for (let i = 0; i < n; i++) {
+      const px = x + gap + i * (32 + gap);
+      column(px, h, 2);
+      column(px + 16, h, 2);
+      h = Math.max(1, Math.min(2, h + (r() < 0.5 ? -1 : 1)));
+    }
+    return w;
+  }
+
+  // A bridge of awnings over a pit, reached from a two-crate step.
+  function bridge(x, d) {
+    column(x, 1);
+    column(x + 16, 2);
+    const n = 3 + Math.floor(r() * (2 + d * 2));
+    let ax = x + 32;
+    const pitX = ax;
+    for (let i = 0; i < n; i++) {
+      ax += step4(28, 32 + Math.round(d * 8));
+      const aw = 32 + Math.floor(r() * 2) * 16;
+      awningList.push([ax, 120, aw]);
+      ax += aw;
+    }
+    ax += step4(24, 32);
+    pits.push({ x: pitX, w: ax - pitX });
+    return ax - x;
+  }
+
+  // Awnings stepping up and back down over a pit.
+  function stairs(x) {
+    const ys = [128, 112, 96, 112, 128];
+    let ax = x + 24;
+    ys.forEach((y, i) => {
+      awningList.push([ax, y, 48]);
+      ax += 48 + (i < 2 ? step4(20, 28) : step4(24, 32)); // going down you fly further
+    });
+    pits.push({ x, w: ax - x });
+    return ax - x;
+  }
+
+  // Climb a four-crate tower and leap off it over a pit.
+  function tower(x, d) {
+    column(x, 1);
+    column(x + 16, 2);
+    column(x + 32, 3);
+    column(x + 48, 4);
+    const pw = step4(40, 48 + Math.round(d * 16));
+    pits.push({ x: x + 64, w: pw });
+    return 64 + pw;
+  }
+
   let x = START;
   while (x < END) {
     const d = (x - START) / (END - START); // difficulty 0 → 1 along the street
     const roll = r();
     let width;
-    if (roll < 0.22 + d * 0.1) {
+    if (roll < 0.14 + d * 0.22) {
+      // Parkour section
+      width = pick([pillars, bridge, stairs, tower])(x, d);
+    } else if (roll < 0.36 + d * 0.16) {
       // Pit: 32 px early on, up to 48 px later (a full-speed jump clears about 54)
       width = 32 + Math.floor(r() * (1 + d * 1.99)) * 8;
       pits.push({ x, w: width });
       if (r() < 0.35) awningList.push([x - 8, 96 + Math.floor(r() * 2) * 10, width + 16]);
-    } else if (roll < 0.40 + d * 0.12) {
+    } else if (roll < 0.50 + d * 0.16) {
       // Pedestrian strolling back and forth
       width = 90 + Math.floor(r() * 60);
       pedestrians.push({
         x: x + r() * width, min: x, max: x + width, dir: r() < 0.5 ? -1 : 1,
         speed: 22 + r() * (14 + d * 22), look: Math.floor(r() * 4), anim: 0,
       });
-    } else if (roll < 0.50) {
-      // Puddle
-      width = 40 + Math.floor(r() * 4) * 8;
+    } else if (roll < 0.57 + d * 0.12) {
+      // Puddle, often with a crate in the middle of it
+      width = 48 + Math.floor(r() * 4) * 8;
       puddles.push({ x, w: width });
+      if (r() < 0.5) column(x + width / 2 - 8, 1);
     } else {
       // Crates, harder patterns more likely later on
-      const pattern = r() < 0.15 + d * 0.6 ? pick(HARD) : pick(EASY);
-      for (const [dx, h] of pattern) {
-        for (let k = 0; k < h; k++) crateList.push([x + dx, 136 - k * 16]);
-      }
+      const pattern = r() < 0.2 + d * 0.6 ? pick(HARD) : pick(EASY);
+      for (const [dx, h] of pattern) column(x + dx, h);
       width = pattern[pattern.length - 1][0] + 16;
       if (r() < 0.35) {
         const aw = 48 + Math.floor(r() * 3) * 16;
         awningList.push([x + width + 24 + Math.floor(r() * 40), 88 + Math.floor(r() * 3) * 10, aw]);
       }
-      // Later on, a pit often waits right behind a crate pile
-      if (d > 0.35 && r() < d * 0.5) {
+      // Later on, a pit often follows a crate pile
+      const lastH = pattern[pattern.length - 1][1];
+      const tallest = Math.max(...pattern.map(([, h]) => h));
+      if (d > 0.3 && r() < d * 0.6) {
         const pw = 32 + Math.floor(r() * 2) * 8;
-        pits.push({ x: x + width + 56, w: pw });
-        width += 56 + pw;
+        // Right behind a pile too tall to hop over from the ground, so the only way
+        // across is a leap from its top; otherwise leave room to land before the pit.
+        const gap = lastH === tallest && tallest >= 3 ? 0 : 88;
+        pits.push({ x: x + width + gap, w: pw });
+        width += gap + pw;
       }
     }
-    x += width + Math.max(70, 150 - d * 70) + Math.floor(r() * 120);
+    // Less breathing room between obstacles the further you get
+    x += width + Math.max(40, 100 - d * 50) + Math.floor(r() * 70);
   }
 })();
 
