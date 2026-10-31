@@ -125,7 +125,7 @@ function generateObstacles(r) {
       // An upper route: a balcony right above a wide awning, reached by jumping
       // straight up from it, often with a clock. It stops short of the awning's
       // end so that dropping off it still reaches the next awning.
-      if (i >= 1 && aw === 48 && r() < 0.6) {
+      if (i >= 1 && aw === 48 && r() < 0.8) {
         balconyList.push([ax + 4, 88, 40]);
         if (r() < 0.6) clock(ax + 24, 74);
       }
@@ -182,15 +182,61 @@ function generateObstacles(r) {
     return end - x + 72; // room to land after dropping off the top
   }
 
+  // The core piece: a chain of balconies along the house fronts at changing
+  // heights. Over a pit it is the only way across; over a stretch of pavement
+  // with people and puddles it is the safer upper route, with boxes to hop and
+  // clocks to grab. Balconies are 56 px wide and the gaps 24–32 px, so a full
+  // jump from the edge lands on the next one going up, level or down.
+  function balconyRun(x, d) {
+    const overPit = r() < 0.4 + d * 0.3;
+    const n = 3 + Math.floor(r() * (2 + d * 2));
+    const W = 56;
+    let y = 112; // the first one can be reached from the pavement
+    let bx = x + 24;
+    const spots = [];
+    for (let i = 0; i < n; i++) {
+      balconyList.push([bx, y, W]);
+      spots.push([bx, y]);
+      if (i === n - 1) break;
+      const dy = i === 0 ? pick([0, -16, -16]) : pick([-16, 0, 16, 32]);
+      const ny = Math.max(80, Math.min(112, y + dy));
+      bx += W + (ny < y ? step4(24, 28) : step4(24, 32));
+      y = ny;
+    }
+    const end = bx + W + 28;
+    // A clock on one of the balconies, at its far end so it never needs a hop
+    if (r() < 0.45) {
+      const [cx, cy] = spots[1 + Math.floor(r() * (spots.length - 1))];
+      clock(cx + W - 10, cy - 14);
+    }
+    if (overPit) {
+      pits.push({ x, w: end - x });
+    } else {
+      // Down on the pavement: people and puddles; up top: a box or two in the way
+      if (r() < 0.7) {
+        pedestrians.push({
+          x: x + r() * (end - x), min: x, max: end, dir: r() < 0.5 ? -1 : 1,
+          speed: 26 + r() * (16 + d * 20), look: Math.floor(r() * 4), anim: 0,
+        });
+      }
+      if (r() < 0.5) puddles.push({ x: x + 40 + Math.floor(r() * 40), w: 48 + Math.floor(r() * 3) * 8 });
+      for (const [sx, sy] of spots.slice(1)) {
+        if (r() < 0.3) crateList.push([sx + W / 2 - 8, sy - 16]);
+      }
+    }
+    return end - x;
+  }
+
   let x = START;
   while (x < END) {
     const d = (x - START) / (END - START); // difficulty 0 → 1 along the street
     const roll = r();
     let width;
-    if (roll < 0.14 + d * 0.22) {
+    if (roll < 0.24 + d * 0.22) {
       // Parkour section
       // plus room to land: dropping off the last platform carries you ~80 px
-      width = pick([pillars, bridge, stairs, tower, balconies])(x, d) + 56;
+      // Balconies are the backbone: chains of them come up most often
+      width = pick([balconyRun, balconyRun, balconyRun, balconies, bridge, pillars, stairs, tower])(x, d) + 56;
     } else if (roll < 0.36 + d * 0.16) {
       // Pit: 32 px early on, up to 48 px later (a full-speed jump clears about 54)
       width = 32 + Math.floor(r() * (1 + d * 1.99)) * 8;
