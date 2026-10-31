@@ -1,5 +1,5 @@
 // Pixel sprites drawn as text grids. Each character is one pixel; see PALETTE.
-// Sprites face right; the game mirrors them for left.
+// The courier faces right; the game mirrors him for left.
 
 const PALETTE = {
   K: '#1a1c2c', // outline
@@ -8,17 +8,17 @@ const PALETTE = {
   S: '#f4b48c', // skin
   s: '#c78462', // skin shade
   H: '#5a3a22', // hair
-  W: '#f4f4f4', // white (cap logo, eye shine)
-  B: '#3b5dc9', // jeans
-  b: '#29366f', // jeans shade
+  W: '#f4f4f4', // white (cap logo)
+  B: '#3b5dc9', // near leg
+  b: '#29366f', // far leg, darker so the two legs read apart
   G: '#333c57', // shoes
   Y: '#e2a95c', // pizza box
   y: '#a8703c', // pizza box shade
   P: '#f7d51d', // box logo
 };
 
-// Upper body: rows 0-15 of a 16x24 courier, holding a pizza box.
-const COURIER_TOP = [
+// Upper body, 16x16, holding the pizza box.
+const TOP = [
   '................',
   '.....KKKKK......',
   '....KRRRRRK.....',
@@ -37,69 +37,141 @@ const COURIER_TOP = [
   '...KrRRRRRK.....',
 ];
 
-// Legs: rows 16-23, one set per pose.
+// Same, with the eye closed.
+const TOP_BLINK = TOP.map((row, i) => (i === 7 ? '...KHSSSsSSK....' : row));
+
+// Same, leaning back while braking.
+const TOP_SKID = TOP.map((row) => '.' + row.slice(0, 15));
+
+// Legs, 16x8, drawn under the upper body.
 const LEGS = {
   stand: [
     '....KBBBBBK.....',
-    '....KBBBBBK.....',
-    '....KBBKBBK.....',
-    '....KBBKBBK.....',
-    '....KBBKBBK.....',
-    '....KbbKbbK.....',
+    '....KbbBBBK.....',
+    '....KbbKBBK.....',
+    '....KbbKBBK.....',
+    '....KbbKBBK.....',
+    '....KbbKBBK.....',
     '...KGGGKGGGK....',
     '...KKKKKKKKK....',
   ],
-  stride: [
+  // Walk cycle: near leg forward, near leg planted, far leg forward, far leg planted.
+  contactA: [
     '....KBBBBBK.....',
-    '....KBBBBBBK....',
-    '...KBBBKKBBBK...',
-    '...KBBK..KBBK...',
-    '..KBBK....KBBK..',
-    '..KbbK....KbbK..',
-    '.KGGGK....KGGGK.',
-    '.KKKKK....KKKKK.',
+    '...KbbBBBBBK....',
+    '...KbbKKBBBK....',
+    '..KbbK..KBBBK...',
+    '..KbbK...KBBK...',
+    '.KbbK.....KBBK..',
+    '.KGGK.....KGGGK.',
+    '.KKKK.....KKKKK.',
   ],
-  pass: [
+  passA: [
     '....KBBBBBK.....',
-    '....KBBBBBK.....',
-    '....KBBBBK......',
-    '....KBBBBK......',
-    '....KBBKBBK.....',
-    '....KbbKbbK.....',
-    '....KGGKGGGK....',
-    '....KKKKKKKK....',
+    '....KbbBBBK.....',
+    '....KbbbBBK.....',
+    '.....KbbKBBK....',
+    '....KGGKKBBK....',
+    '....KKK.KBBK....',
+    '.......KGGGK....',
+    '.......KKKKK....',
   ],
-  jump: [
+  contactB: [
     '....KBBBBBK.....',
-    '...KBBBBBBBK....',
-    '..KBBBKKKBBBK...',
-    '..KBBK...KBBK...',
-    '..KbbK....KbbK..',
+    '...KBBBBbbbK....',
+    '...KBBBKKbbK....',
+    '..KBBBK..KbbK...',
+    '..KBBK....KbbK..',
+    '.KBBK.....KbbK..',
+    '.KGGK.....KGGGK.',
+    '.KKKK.....KKKKK.',
+  ],
+  passB: [
+    '....KBBBBBK.....',
+    '....KBBBbbK.....',
+    '....KBBBbbK.....',
+    '.....KBBKbbK....',
+    '....KGGKKbbK....',
+    '....KKK.KbbK....',
+    '.......KGGGK....',
+    '.......KKKKK....',
+  ],
+  rise: [
+    '....KBBBBBK.....',
+    '...KbbBBBBBK....',
+    '..KbbbKKKBBBK...',
+    '..KbbK...KBBK...',
+    '..KbbK....KBBK..',
     '..KGGGK...KGGGK.',
     '..KKKKK...KKKKK.',
     '................',
   ],
+  fall: [
+    '....KBBBBBK.....',
+    '....KbbBBBK.....',
+    '...KbbKKBBK.....',
+    '...KbbK.KBBK....',
+    '...KbbK..KBBK...',
+    '...KGGK..KGGGK..',
+    '...KKKK..KKKKK..',
+    '................',
+  ],
+  crouch: [
+    '................',
+    '................',
+    '...KbBBBBBBK....',
+    '..KbbBKKKBBBK...',
+    '..KbbK...KBBK...',
+    '..KbbK...KBBK...',
+    '.KGGGK...KGGGK..',
+    '.KKKKK...KKKKK..',
+  ],
+  skid: [
+    '....KBBBBBK.....',
+    '....KbbBBBBK....',
+    '....KbbKKBBBK...',
+    '...KbbK..KBBK...',
+    '...KbbK...KBBK..',
+    '..KbbK.....KBBK.',
+    '.KGGGK.....KGGGK',
+    '.KKKKK.....KKKKK',
+  ],
 };
 
-function makeSprite(rows) {
-  const c = document.createElement('canvas');
-  c.width = rows[0].length;
-  c.height = rows.length;
-  const g = c.getContext('2d');
+function paint(g, rows, oy) {
   rows.forEach((row, y) => {
     [...row].forEach((ch, x) => {
       if (ch === '.') return;
       g.fillStyle = PALETTE[ch];
-      g.fillRect(x, y, 1, 1);
+      g.fillRect(x, y + oy, 1, 1);
     });
   });
+}
+
+// One 16x24 frame: legs at the bottom, upper body lowered by `bob` pixels.
+function frame(top, legs, bob = 0) {
+  const c = document.createElement('canvas');
+  c.width = 16;
+  c.height = 24;
+  const g = c.getContext('2d');
+  paint(g, legs, 16);
+  paint(g, top, bob);
   return c;
 }
 
-// Frames by name. "walk" cycles stride → pass → stride → pass with a bob.
 const COURIER = {
-  idle: makeSprite([...COURIER_TOP, ...LEGS.stand]),
-  stride: makeSprite([...COURIER_TOP, ...LEGS.stride]),
-  pass: makeSprite([...COURIER_TOP, ...LEGS.pass]),
-  jump: makeSprite([...COURIER_TOP, ...LEGS.jump]),
+  idle: frame(TOP, LEGS.stand),
+  breathe: frame(TOP, LEGS.stand, 1),
+  blink: frame(TOP_BLINK, LEGS.stand),
+  // Body dips on the wide steps and rises as the legs pass.
+  walk: [
+    frame(TOP, LEGS.contactA, 1),
+    frame(TOP, LEGS.passA),
+    frame(TOP, LEGS.contactB, 1),
+    frame(TOP, LEGS.passB),
+  ],
+  rise: frame(TOP, LEGS.rise),
+  fall: frame(TOP, LEGS.fall),
+  land: frame(TOP, LEGS.crouch, 2),
+  skid: frame(TOP_SKID, LEGS.skid),
 };

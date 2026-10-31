@@ -313,10 +313,14 @@ const player = {
   grounded: true,
   sinceGround: 0,
   animTime: 0,
+  landTime: 0,   // seconds left on the landing crouch
+  skidding: false,
+  skidTime: 0,   // seconds left on the braking pose
 };
 
 let clock = 0;
 const dust = [];
+const steam = [];
 
 function hits(px, py, b) {
   return px + player.ox < b.x + b.w && px + player.ox + player.w > b.x &&
@@ -333,6 +337,15 @@ function update(dt) {
   clock += dt;
   const p = player;
   const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+
+  // Braking hard against your own momentum
+  if (p.grounded && dir !== 0 && Math.sign(p.vx) === -dir && Math.abs(p.vx) > 60 && p.skidTime <= 0) {
+    p.skidTime = 0.2;
+    beep(500, 250, 0.1, 'sawtooth', 0.03);
+  }
+  p.skidTime = p.grounded ? Math.max(0, p.skidTime - dt) : 0;
+  p.skidding = p.skidTime > 0;
+  if (p.skidding && Math.random() < 0.6) puff(p.x + 8 + p.facing * 5, p.y + 24, 1);
 
   // Horizontal speed
   if (dir) {
@@ -396,9 +409,25 @@ function update(dt) {
   if (p.grounded && !wasGrounded && fallSpeed > 120) {
     puff(p.x + 8, p.y + 24, 6);
     beep(160, 80, 0.08, 'triangle', 0.08);
+    p.landTime = fallSpeed > 250 ? 0.14 : 0.09;
   }
+  p.landTime = Math.max(0, p.landTime - dt);
 
-  p.animTime = p.grounded && Math.abs(p.vx) > 5 ? p.animTime + dt * (Math.abs(p.vx) / PHYS.maxSpeed) : 0;
+  // Walk cycle advances with distance, so faster steps at full speed
+  p.animTime = p.grounded && Math.abs(p.vx) > 5 ? p.animTime + Math.abs(p.vx) * dt : 0;
+
+  // Steam from the hot pizza
+  if (Math.random() < dt * 3) {
+    const boxX = p.facing > 0 ? p.x + 12 : p.x + 2;
+    steam.push({ x: boxX + Math.random() * 3 - 1, y: p.y + 10, life: 0.8 + Math.random() * 0.4 });
+  }
+  for (let i = steam.length - 1; i >= 0; i--) {
+    const s = steam[i];
+    s.life -= dt;
+    s.y -= 12 * dt;
+    s.x += Math.sin((s.life + i) * 8) * 6 * dt;
+    if (s.life <= 0) steam.splice(i, 1);
+  }
 
   for (let i = dust.length - 1; i >= 0; i--) {
     const d = dust[i];
@@ -414,9 +443,13 @@ function update(dt) {
 let camX = 0;
 
 function courierFrame() {
-  if (!player.grounded) return COURIER.jump;
-  if (player.animTime === 0) return COURIER.idle;
-  return Math.floor(player.animTime * 10) % 2 ? COURIER.pass : COURIER.stride;
+  const p = player;
+  if (!p.grounded) return p.vy < -40 ? COURIER.rise : COURIER.fall;
+  if (p.landTime > 0) return COURIER.land;
+  if (p.skidding) return COURIER.skid;
+  if (p.animTime > 0) return COURIER.walk[Math.floor(p.animTime / 7) % 4]; // a new pose every 7 px
+  if (clock % 3.2 < 0.12) return COURIER.blink;
+  return clock % 1.6 < 0.8 ? COURIER.idle : COURIER.breathe;
 }
 
 function tiled(img, speed, y = 0) {
@@ -458,6 +491,11 @@ function render() {
     ctx.restore();
   } else {
     ctx.drawImage(img, px, py);
+  }
+
+  for (const s of steam) {
+    ctx.fillStyle = s.life > 0.5 ? 'rgba(244,244,244,0.8)' : 'rgba(244,244,244,0.4)';
+    ctx.fillRect(Math.round(s.x - cx), Math.round(s.y), 1, 1);
   }
 }
 
