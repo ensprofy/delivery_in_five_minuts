@@ -126,7 +126,8 @@ const solids = [];
   }
   solids.push({ x: gx, y: GROUND_Y, w: WORLD_W + 16 - gx, h: 64 });
 }
-const crates = crateList.map(([x, y]) => ({ x, y, w: 16, h: 16 }));
+// About a third of the boxes are cardboard, the rest wooden crates (a fixed shuffle).
+const crates = crateList.map(([x, y], i) => ({ x, y, w: 16, h: 16, card: ((i * 2654435761) >>> 0) % 100 < 35 }));
 solids.push(...crates);
 // World edges
 solids.push({ x: -16, y: -200, w: 16, h: 400 }, { x: WORLD_W, y: -200, w: 16, h: 400 });
@@ -478,15 +479,70 @@ const street = layer(WORLD_W, VIEW_H, (g) => {
   }
 });
 
-const crateImg = layer(16, 16, (g) => {
-  g.fillStyle = '#1a1c2c'; g.fillRect(0, 0, 16, 16);
-  g.fillStyle = '#b07a45'; g.fillRect(1, 1, 14, 14);
-  g.fillStyle = '#8a5a30';
-  g.fillRect(1, 5, 14, 1); g.fillRect(1, 10, 14, 1);
-  g.fillStyle = '#d29a5c'; g.fillRect(1, 1, 14, 1);
-  g.fillStyle = '#6e4626';
-  for (let i = 0; i < 12; i++) g.fillRect(2 + i, 13 - i, 1, 1);
+// Box textures, drawn pixel by pixel from a 16x16 grid of colour letters.
+function gridImage(rows, colors) {
+  return layer(rows[0].length, rows.length, (g) => {
+    rows.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch === '.') return;
+      g.fillStyle = colors[ch];
+      g.fillRect(x, y, 1, 1);
+    }));
+  });
+}
+
+// Wooden crate: two-tone frame, planks, a diagonal brace and corner nails.
+const woodCrate = (() => {
+  const rows = [];
+  for (let y = 0; y < 16; y++) {
+    let row = '';
+    for (let x = 0; x < 16; x++) {
+      let ch;
+      if (x === 0 || y === 0 || x === 15 || y === 15) ch = 'K';
+      else if ((x === 2 || x === 13) && (y === 2 || y === 13)) ch = 'n';
+      else if (y === 1 || x === 1) ch = 'L';
+      else if (y === 14 || x === 14) ch = 'D';
+      else if (y === 2 || x === 2 || y === 13 || x === 13) ch = 'M';
+      else if (x - 3 === 12 - y) ch = 'x';                 // brace
+      else if (x - 4 === 12 - y) ch = 'y';                 // brace shadow
+      else if (y === 6 || y === 9) ch = 'q';               // gaps between planks
+      else if ((x * 5 + y * 3) % 11 === 0) ch = 'q';       // wood grain
+      else ch = 'p';
+      row += ch;
+    }
+    rows.push(row);
+  }
+  return gridImage(rows, {
+    K: '#1a1c2c', L: '#e0aa6a', M: '#b8803f', D: '#7a4a24', n: '#d6dbe4',
+    p: '#c48c4e', q: '#94612f', x: '#ebbd80', y: '#6e4626',
+  });
+})();
+
+// Cardboard box: flaps, packing tape, a shipping label and "this way up" arrows.
+const cardBox = gridImage([
+  'KKKKKKKKKKKKKKKK',
+  'KllllltTTtllllbK',
+  'KBBBBBtTTtBBBBbK',
+  'KBBBBBtTTtBBBBbK',
+  'KbbbbbtTTtbbbbbK',
+  'KBBBBBtTTtBBBBbK',
+  'KBBBBBBttBBBBBbK',
+  'KBBBBBBBBBBBBBbK',
+  'KBBrBBrBBBBBBBbK',
+  'KBrrrrrrBWWWWBbK',
+  'KBBrBBrBBWkkWBbK',
+  'KBBrBBrBBWWWWBbK',
+  'KBBrBBrBBWkkWBbK',
+  'KBBBBBBBBWWWWBbK',
+  'KbbbbbbbbbbbbbbK',
+  'KKKKKKKKKKKKKKKK',
+], {
+  K: '#1a1c2c', B: '#c9a26b', b: '#9e7744', l: '#e3c08a',
+  T: '#efe4bf', t: '#c7b78a', r: '#d23c3c', W: '#f4f4f4', k: '#8e8e9a',
 });
+
+function boxImage(c) {
+  return c.card ? cardBox : woodCrate;
+}
 
 function drawAwning(a, camX) {
   const x = Math.round(a.x - camX);
@@ -963,33 +1019,46 @@ function heat(p) {
   return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`;
 }
 
-// Block progress bar along the bottom: the courier's face rides along it,
-// the blocks behind him fill up (cold blue → hot red), the house waits at the end.
-const BAR = { x: 12, y: 170, blocks: 30, size: 8, gap: 1 };
-BAR.w = BAR.blocks * (BAR.size + BAR.gap) - BAR.gap;
+// Progress line along the bottom: the courier's face rides on it with a smooth
+// trail behind him (cold blue → hot red), a dotted path ahead, the house at the end.
+const BAR = { x: 10, y: 172, w: 278 };
 
 function drawProgressBar() {
   const p = progress();
-  const { x, y, blocks, size, gap, w } = BAR;
+  const { x, y, w } = BAR;
+  const headW = COURIER_FACE.width;
+  const headH = COURIER_FACE.height;
+  // Face centre travels from the start to the end of the line
+  const fx = x + headW / 2 + p * (w - headW);
+  const tail = Math.round(fx - headW / 2 + 3); // the trail stops just inside the back of the head
+
   // Backing strip
   ctx.fillStyle = 'rgba(26,28,44,0.75)';
-  ctx.fillRect(x - 6, y - 7, w + 30, 15);
-  // Blocks
-  const filled = p * blocks;
-  for (let i = 0; i < blocks; i++) {
-    const bx = x + i * (size + gap);
+  ctx.fillRect(x - 6, y - 8, w + 30, 16);
+
+  // Path still to go: a dotted line
+  ctx.fillStyle = '#5d6478';
+  for (let px = tail; px < x + w; px += 4) ctx.fillRect(px, y, 2, 1);
+
+  // Trail behind the head, one pixel column at a time so it grows smoothly
+  if (tail > x) {
     ctx.fillStyle = '#1a1c2c';
-    ctx.fillRect(bx - 1, y - 1, size + 2, 8);
-    let color = '#2f3350';
-    if (i < Math.floor(filled)) color = heat(i / (blocks - 1));
-    else if (i < filled && Math.floor(clock * 6) % 2) color = heat(i / (blocks - 1)); // the block being filled blinks
-    ctx.fillStyle = color;
-    ctx.fillRect(bx, y, size, 6);
-    if (color !== '#2f3350') {
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.fillRect(bx, y, size, 1);
+    ctx.fillRect(x - 1, y - 2, tail - x + 2, 5);
+    for (let px = x; px < tail; px++) {
+      ctx.fillStyle = heat((px - x) / w);
+      ctx.fillRect(px, y - 1, 1, 3);
     }
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(x, y - 1, tail - x, 1);
   }
+  // Start cap: a little pizza slice at the pizzeria end
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x - 5, y - 3, 5, 7);
+  ctx.fillStyle = '#f7d51d';
+  ctx.fillRect(x - 4, y - 2, 3, 5);
+  ctx.fillStyle = '#d23c3c';
+  ctx.fillRect(x - 3, y - 1, 1, 1);
+
   // House at the end
   const hx = x + w + 5;
   ctx.fillStyle = '#1a1c2c';
@@ -1003,10 +1072,10 @@ function drawProgressBar() {
   ctx.fillRect(hx, y, 11, 6);
   ctx.fillStyle = '#3b5dc9';
   ctx.fillRect(hx + 4, y + 2, 3, 4);
-  // The courier's face at the tip, bobbing while he runs
-  const fx = Math.round(x + p * (w - 1) - 7);
+
+  // The head sits on the line, bobbing a pixel while he runs
   const bob = Math.abs(player.vx) > 5 && player.grounded ? Math.floor(clock * 10) % 2 : 0;
-  ctx.drawImage(COURIER_FACE, fx, y - 8 - bob);
+  ctx.drawImage(COURIER_FACE, Math.round(fx - headW / 2), Math.round(y - headH / 2) - bob);
 }
 
 // Bouncing arrow over the recipient's door
@@ -1062,7 +1131,7 @@ function render() {
   ctx.drawImage(street, cx, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
 
   for (const a of awnings) if (a.x + a.w > cx && a.x < cx + VIEW_W) drawAwning(a, cx);
-  for (const c of crates) if (c.x + 16 > cx && c.x < cx + VIEW_W) ctx.drawImage(crateImg, c.x - cx, c.y);
+  for (const c of crates) if (c.x + 16 > cx && c.x < cx + VIEW_W) ctx.drawImage(boxImage(c), Math.round(c.x) - cx, c.y);
   drawFlag(cx);
   if (!finished) drawDoorArrow(cx);
 
