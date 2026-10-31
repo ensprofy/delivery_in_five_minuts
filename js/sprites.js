@@ -163,6 +163,28 @@ const LEGS = {
     '...KKKK..KKKKK..',
     '................',
   ],
+  // On the skateboard: knees bent, both feet on the deck
+  ride: [
+    '....KBBBBBK.....',
+    '...KbbBBBBBK....',
+    '..KbbbKKKBBBK...',
+    '..KbbK...KBBK...',
+    '..KbbK...KBBK...',
+    '.KGGGK...KGGGK..',
+    '.KKKKK...KKKKK..',
+    '................',
+  ],
+  // Pushing off: the back foot kicks the ground behind the board
+  push: [
+    '....KBBBBBK.....',
+    '...KbbBBBBK.....',
+    '..KbbKKBBBK.....',
+    '.KbbK..KBBK.....',
+    '.KbbK..KBBK.....',
+    'KbbK..KGGGK.....',
+    'KGGK..KKKKK.....',
+    'KKKK............',
+  ],
   crouch: [
     '................',
     '................',
@@ -222,7 +244,31 @@ const COURIER = {
   fall: frame(buildTop(HEAD, ARMS.back), LEGS.fall),
   land: frame(TOP, LEGS.crouch, 2),
   skid: frame(buildTop(HEAD, ARMS.forward, 1), LEGS.skid),
+  ride: frame(buildTop(HEAD, ARMS.back), LEGS.ride, 1),
+  rideAir: frame(buildTop(HEAD, ARMS.forward), LEGS.ride),
+  push: frame(buildTop(HEAD, ARMS.forward), LEGS.push),
 };
+
+// Skateboard, 16x4: red deck, black grip edge, yellow wheels.
+const SKATEBOARD = (() => {
+  const rows = [
+    '.KKKKKKKKKKKKKK.',
+    'KRRRRRRRRRRRRRRK',
+    '.KKKKKKKKKKKKKK.',
+    '..KYK......KYK..',
+  ];
+  const c = document.createElement('canvas');
+  c.width = 16;
+  c.height = 4;
+  const g = c.getContext('2d');
+  const colors = { K: '#1a1c2c', R: '#d23c3c', Y: '#f7d51d' };
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch === '.') return;
+    g.fillStyle = colors[ch];
+    g.fillRect(x, y, 1, 1);
+  }));
+  return c;
+})();
 // ---------- Pedestrians ----------
 // 12x22, facing right. Letters: K outline, S skin, H hair, C coat, c coat shade,
 // L legs, F shoes. Each look swaps the colours.

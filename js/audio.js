@@ -238,6 +238,56 @@ const Sound = (() => {
     playNotes(gold ? ['E6', 'G6', 'C7', 'E7'] : ['A5', 'C#6', 'E6'], 0.05, 'pulse', 0.07);
   }
 
+  // ---------- Skateboard ----------
+
+  // Wheels on the pavement: looping noise whose loudness follows the speed.
+  let rollGain = null;
+  function roll(level) {
+    if (!ctx || (level <= 0 && !rollGain)) return;
+    if (!rollGain) {
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      src.loop = true;
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = 700;
+      band.Q.value = 0.8;
+      rollGain = ctx.createGain();
+      rollGain.gain.value = 0;
+      src.connect(band).connect(rollGain).connect(sfxBus);
+      src.start();
+    }
+    rollGain.gain.setTargetAtTime(muted ? 0 : Math.min(1, level) * 0.22, ctx.currentTime, 0.05);
+  }
+
+  // Ollie: the tail snaps the pavement, then the board pops up.
+  function ollie() {
+    if (!init() || muted) return;
+    const t = ctx.currentTime;
+    hiss(t, 0.03, 0.5, sfxBus, 'highpass', 3000);
+    osc('square', 180, t, 0.05, 0.08, sfxBus, 90);
+    osc('pulse', 300, t + 0.02, 0.14, 0.05, sfxBus, 800);
+  }
+
+  function boardLand() {
+    if (!init() || muted) return;
+    const t = ctx.currentTime;
+    hiss(t, 0.06, 0.45, sfxBus, 'bandpass', 1800);
+    osc('square', 140, t, 0.06, 0.07, sfxBus, 70);
+  }
+
+  function boardGet() {
+    playNotes(['C5', 'E5', 'G5', 'B5', 'D6'], 0.045, 'pulse', 0.07);
+  }
+
+  // The board clatters away; a crash sounds harsher.
+  function boardLose(crash) {
+    if (!init() || muted) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 3; i++) hiss(t + i * 0.07, 0.05, crash ? 0.5 : 0.3, sfxBus, 'bandpass', 1500 - i * 300);
+    osc('square', crash ? 260 : 400, t, 0.2, 0.06, sfxBus, crash ? 80 : 200);
+  }
+
   function fanfare() {
     playNotes(['C5', 'E5', 'G5', 'C6', '.', 'G5', 'C6', '.', '.', 'E6'], 0.11, 'pulse', 0.09);
     playNotes(['C4', '.', 'G4', '.', 'C5', '.', 'E4', '.', 'C4'], 0.11, 'triangle', 0.18);
@@ -268,6 +318,7 @@ const Sound = (() => {
 
   return {
     beep, step, jump, land, startMusic, stopMusic, setUrgency, tick, pickup, fanfare, fail,
+    roll, ollie, boardLand, boardGet, boardLose,
     toggleMute() { setMuted(!muted); return !muted; },
     toggleMusic() { setMusic(!musicOn); return musicOn; },
   };

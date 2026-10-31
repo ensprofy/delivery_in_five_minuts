@@ -21,6 +21,9 @@ const PHYS = {
   buffer: 0.1,     // a jump pressed this early before landing still counts
 };
 
+// Skateboard tuning: faster, rolls further, takes a moment to push up to speed.
+const BOARD = { time: 12, maxSpeed: 175, accel: 520, friction: 240 };
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
@@ -62,6 +65,7 @@ const pedestrians = []; // { x, min, max, dir, speed, look, anim, floor, still }
 const puddles = [];     // { x, w }
 const clockSpots = [];  // { x, y, gold }: where the bonus clocks hang
 const balconyList = []; // [x, y, w]
+const boardSpots = [];  // x of skateboards lying on the pavement
 
 function generateObstacles(r) {
   const pick = (list) => list[Math.floor(r() * list.length)];
@@ -243,11 +247,17 @@ function generateObstacles(r) {
   }
 
   let x = START;
+  let nextBoard = START + 200 + Math.floor(r() * 600);
   while (x < END) {
     const d = (x - START) / (END - START); // difficulty 0 → 1 along the street
     const roll = r();
     let width;
-    if (roll < 0.24 + d * 0.22) {
+    if (x >= nextBoard && x < END - 600) {
+      // A clear stretch of pavement with a skateboard at the start: room to get going
+      boardSpots.push(x + 16);
+      width = 360;
+      nextBoard = x + 2000 + Math.floor(r() * 1200);
+    } else if (roll < 0.24 + d * 0.22) {
       // Parkour section
       // plus room to land: dropping off the last platform carries you ~80 px
       // Balconies are the backbone: chains of them come up most often
@@ -337,7 +347,7 @@ let levelSeed = 0;
 // Lay out a fresh street from a seed: hand-made start, generated rest.
 function buildLevel(seed) {
   levelSeed = seed;
-  for (const list of [crateList, awningList, pits, pedestrians, puddles, clockSpots, balconyList, solids, crates, awnings]) {
+  for (const list of [crateList, awningList, pits, pedestrians, puddles, clockSpots, balconyList, boardSpots, solids, crates, awnings]) {
     list.length = 0;
   }
   crateList.push(...HAND_CRATES.map((c) => [...c]));
@@ -898,6 +908,11 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') { toast(Sound.toggleMute() ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ'); return; }
   if (e.code === 'KeyN') { toast(Sound.toggleMusic() ? 'МУЗЫКА ВКЛ' : 'МУЗЫКА ВЫКЛ'); return; }
   if (e.code === 'KeyR' && started && !finished) { respawn(); return; }
+  if ((e.code === 'ArrowDown' || e.code === 'KeyS') && started && !finished) {
+    e.preventDefault();
+    if (player.board > 0) loseBoard('off');
+    return;
+  }
   if (e.code === 'Enter' && finished && !document.getElementById('result').hidden) { restart(); return; }
   const action = KEYMAP[e.code];
   if (!action) { if (!started) start(); return; }
@@ -957,6 +972,7 @@ const player = {
   lastPose: -1,  // walk pose on the previous step, for footstep timing
   stun: 0,       // seconds without control after bumping into someone
   invuln: 0,     // seconds of blinking safety after a bump or fall
+  board: 0,      // seconds of skateboard left (0 = on foot)
 };
 
 let clock = 0;
@@ -984,11 +1000,17 @@ function update(dt) {
   // Puddles: slippery and slow
   const feetX = p.x + 9;
   const inPuddle = p.grounded && puddles.some((pd) => feetX > pd.x && feetX < pd.x + pd.w);
-  const maxSpeed = inPuddle ? PHYS.maxSpeed * 0.5 : PHYS.maxSpeed;
+  const onBoard = p.board > 0;
+  const top = onBoard ? BOARD.maxSpeed : PHYS.maxSpeed;
+  const maxSpeed = inPuddle ? top * (onBoard ? 0.7 : 0.5) : top;
+  if (onBoard) {
+    p.board -= dt;
+    if (p.board <= 0) loseBoard('time');
+  }
   if (inPuddle && Math.abs(p.vx) > 20 && Math.random() < 0.5) splash(feetX, GROUND_Y);
 
   // Braking hard against your own momentum
-  if (p.grounded && dir !== 0 && Math.sign(p.vx) === -dir && Math.abs(p.vx) > 60 && p.skidTime <= 0) {
+  if (!onBoard && p.grounded && dir !== 0 && Math.sign(p.vx) === -dir && Math.abs(p.vx) > 60 && p.skidTime <= 0) {
     p.skidTime = 0.2;
     beep(500, 250, 0.1, 'sawtooth', 0.03);
   }
@@ -998,11 +1020,14 @@ function update(dt) {
 
   // Horizontal speed
   if (dir) {
-    p.vx += dir * (p.grounded ? PHYS.accel : PHYS.airAccel) * dt;
-    p.vx = Math.max(-maxSpeed, Math.min(maxSpeed, p.vx));
+    const before = Math.abs(p.vx);
+    p.vx += dir * (p.grounded ? (onBoard ? BOARD.accel : PHYS.accel) : PHYS.airAccel) * dt;
+    // Over the limit: if you were already faster (rolling into a puddle, or just
+    // off the board) ease down, otherwise just cap it
+    if (Math.abs(p.vx) > maxSpeed) p.vx = Math.sign(p.vx) * Math.max(maxSpeed, Math.min(Math.abs(p.vx), before - 400 * dt));
     p.facing = dir;
   } else if (p.grounded) {
-    const f = PHYS.friction * dt;
+    const f = (p.board > 0 ? BOARD.friction : PHYS.friction) * dt;
     p.vx = Math.abs(p.vx) <= f ? 0 : p.vx - Math.sign(p.vx) * f;
   }
 
@@ -1015,7 +1040,7 @@ function update(dt) {
     p.sinceGround = PHYS.coyote + 1;
     jumpPressedAt = -1;
     puff(p.x + 9, p.y + 24, 4);
-    Sound.jump();
+    if (p.board > 0) Sound.ollie(); else Sound.jump();
   }
   if (p.vy >= 0) p.bounced = false;
   if (!keys.jump && !p.bounced && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
@@ -1024,13 +1049,22 @@ function update(dt) {
 
   // Move X, then Y, resolving collisions on each axis
   let nx = p.x + p.vx * dt;
+  let crashed = false;
   for (const b of solids) {
     if (hits(nx, p.y, b)) {
       nx = p.vx > 0 ? b.x - p.ox - p.w : b.x + b.w - p.ox;
+      // Slamming into a box on the skateboard sends the board flying
+      if (p.board > 0 && b.h === 16 && Math.abs(p.vx) > 120) crashed = Math.sign(p.vx);
       p.vx = 0;
     }
   }
   p.x = nx;
+  if (crashed) {
+    loseBoard('crash');
+    p.vx = -crashed * 70;
+    p.vy = -120;
+    p.stun = 0.35;
+  }
 
   const wasGrounded = p.grounded;
   const fallSpeed = p.vy;
@@ -1058,9 +1092,13 @@ function update(dt) {
 
   if (p.grounded && !wasGrounded && fallSpeed > 120) {
     puff(p.x + 9, p.y + 24, 6);
-    Sound.land(fallSpeed > 250);
-    p.landTime = fallSpeed > 250 ? 0.14 : 0.09;
+    if (p.board > 0) Sound.boardLand(); else Sound.land(fallSpeed > 250);
+    p.landTime = p.board > 0 ? 0 : fallSpeed > 250 ? 0.14 : 0.09;
   }
+  // The board only rolls on the street: land on boxes, an awning or a balcony
+  // and you step off it there.
+  if (p.board > 0 && p.grounded && !wasGrounded && p.y + p.oy + p.h < GROUND_Y - 1) loseBoard('step');
+  updateBoards(dt);
   p.landTime = Math.max(0, p.landTime - dt);
 
   updatePedestrians(dt);
@@ -1071,7 +1109,7 @@ function update(dt) {
 
   // A footstep each time a foot touches down in the walk cycle (poses 0 and 2)
   const pose = p.animTime > 0 ? Math.floor(p.animTime / 7) % 4 : -1;
-  if (pose !== p.lastPose && pose % 2 === 0 && !p.skidding) Sound.step();
+  if (pose !== p.lastPose && pose % 2 === 0 && !p.skidding && p.board <= 0) Sound.step();
   p.lastPose = pose;
 
   // Steam from the hot pizza in the backpack
@@ -1139,6 +1177,7 @@ function updatePedestrians(dt) {
         p.invuln = 1.2;
         beep(220, 110, 0.18, 'square', 0.07);
         toast('ОЙ!');
+        if (p.board > 0) loseBoard('crash');
       }
     }
   }
@@ -1154,9 +1193,103 @@ function fellInPit() {
   const groundTop = under.length ? Math.min(...under.map((c) => c.y)) : GROUND_Y;
   Object.assign(p, { x, y: groundTop - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0, stun: 0.3, invuln: 1.2 });
   timeLeft = Math.max(0, timeLeft - 5);
+  p.board = 0;
   puff(p.x + 9, p.y + 24, 8);
   beep(500, 120, 0.35, 'square', 0.06);
   toast('−5 СЕКУНД');
+}
+
+// ---------- Skateboard ----------
+
+const boards = [];        // pickups: { x, taken }
+const flyingBoards = [];  // boards tumbling away after a crash or at the end
+function resetBoards() {
+  boards.length = 0;
+  for (const x of boardSpots) boards.push({ x, taken: false });
+  flyingBoards.length = 0;
+  player.board = 0;
+}
+
+function loseBoard(reason) {
+  const p = player;
+  if (p.board <= 0 && reason !== 'time') return;
+  p.board = 0;
+  // Back to walking pace
+  p.vx = Math.max(-PHYS.maxSpeed, Math.min(PHYS.maxSpeed, p.vx));
+  flyingBoards.push({
+    x: p.x + 1, y: p.y + 21, vx: (reason === 'crash' ? -1 : 1) * p.facing * (40 + Math.random() * 40),
+    vy: -90 - Math.random() * 60, spin: 0, life: 1.2,
+  });
+  Sound.boardLose(reason === 'crash');
+  if (reason === 'crash') toast('БАХ!');
+}
+
+function updateBoards(dt) {
+  const p = player;
+  if (p.board <= 0 && !finished) {
+    for (const b of boards) {
+      if (b.taken) continue;
+      if (p.x + p.ox < b.x + 16 && p.x + p.ox + p.w > b.x && p.y + p.oy + p.h > GROUND_Y - 8 && p.y + p.oy + p.h <= GROUND_Y + 1) {
+        b.taken = true;
+        p.board = BOARD.time;
+        toast('СКЕЙТ!');
+        Sound.boardGet();
+        break;
+      }
+    }
+  }
+  for (let i = flyingBoards.length - 1; i >= 0; i--) {
+    const f = flyingBoards[i];
+    f.life -= dt;
+    f.vy += 600 * dt;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+    f.spin += dt * 14;
+    if (f.life <= 0) flyingBoards.splice(i, 1);
+  }
+  Sound.roll(p.board > 0 && p.grounded ? Math.abs(p.vx) / BOARD.maxSpeed : 0);
+}
+
+function drawBoards(cx) {
+  for (const b of boards) {
+    if (b.taken || b.x < cx - 20 || b.x > cx + VIEW_W + 4) continue;
+    const x = Math.round(b.x - cx);
+    ctx.drawImage(SKATEBOARD, x, GROUND_Y - 4);
+    // A bouncing arrow and a glint so it is easy to spot
+    const y = GROUND_Y - 16 - Math.round(Math.abs(Math.sin(clock * 5)) * 3);
+    ctx.fillStyle = '#1a1c2c';
+    ctx.fillRect(x + 4, y - 1, 9, 4);
+    ctx.fillRect(x + 6, y + 3, 5, 2);
+    ctx.fillStyle = '#7dff8a';
+    ctx.fillRect(x + 5, y, 7, 2);
+    ctx.fillRect(x + 7, y + 2, 3, 2);
+    if (Math.floor(clock * 4 + b.x) % 3 === 0) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x + 12, GROUND_Y - 6, 1, 1);
+    }
+  }
+  for (const f of flyingBoards) {
+    ctx.save();
+    ctx.translate(Math.round(f.x - cx) + 8, Math.round(f.y) + 2);
+    ctx.rotate(Math.round(f.spin * 4 / Math.PI) * Math.PI / 4); // in 45° steps, keeps the pixel look
+    ctx.drawImage(SKATEBOARD, -8, -2);
+    ctx.restore();
+  }
+}
+
+// Skateboard time left: a little board and a bar under the stage name
+function drawBoardTimer() {
+  const t = player.board;
+  if (t <= 0) return;
+  const low = t < 3;
+  if (low && Math.floor(clock * 8) % 2) return;
+  ctx.fillStyle = 'rgba(26,28,44,0.6)';
+  ctx.fillRect(2, 15, 60, 10);
+  ctx.drawImage(SKATEBOARD, 4, 18);
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(22, 18, 38, 5);
+  ctx.fillStyle = low ? '#ff5a4a' : '#7dff8a';
+  ctx.fillRect(23, 19, Math.round(36 * t / BOARD.time), 3);
 }
 
 // ---------- Checkpoint ----------
@@ -1168,6 +1301,7 @@ function respawn() {
   puff(player.x + 9, player.y + 24, 8);
   Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
   awayFromBase = false;
+  player.board = 0;
   puff(player.x + 9, player.y + 24, 8);
   beep(880, 220, 0.25, 'square', 0.05);
 }
@@ -1248,6 +1382,7 @@ function resetClocks() {
   for (const c of clockSpots) clocks.push({ ...c, taken: false });
 }
 resetClocks();
+resetBoards();
 const floaters = []; // little "+5" texts that drift up
 let clocksTaken = 0;
 let bonusFlash = 0;
@@ -1329,6 +1464,7 @@ function updateRun(dt) {
 
 function finish(delivered) {
   finished = true;
+  player.board = 0;
   keys.left = keys.right = keys.jump = false;
   player.vx = 0;
   Sound.stopMusic();
@@ -1364,6 +1500,7 @@ function restart() {
   buildLevel(newSeed());
   street = chunkedLayer(WORLD_W, VIEW_H, paintStreet);
   resetClocks();
+  resetBoards();
   clocksTaken = 0;
   floaters.length = 0;
   Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
@@ -1484,6 +1621,11 @@ let camX = 0;
 
 function courierFrame() {
   const p = player;
+  if (p.board > 0) {
+    if (!p.grounded) return COURIER.rideAir;
+    const pushing = (keys.left || keys.right) && Math.abs(p.vx) < BOARD.maxSpeed - 10;
+    return pushing && Math.floor(clock * 5) % 2 ? COURIER.push : COURIER.ride;
+  }
   if (!p.grounded) return p.vy < -40 ? COURIER.rise : COURIER.fall;
   if (p.landTime > 0) return COURIER.land;
   if (p.skidding) return COURIER.skid;
@@ -1498,7 +1640,7 @@ function tiled(img, speed, y = 0) {
 }
 
 function render() {
-  const target = player.x + 9 - VIEW_W / 2 + player.facing * 24;
+  const target = player.x + 9 - VIEW_W / 2 + player.facing * (player.board > 0 ? 64 : 24);
   camX += (target - camX) * 0.1;
   camX = Math.max(0, Math.min(WORLD_W - VIEW_W, camX));
   const cx = Math.round(camX);
@@ -1516,6 +1658,7 @@ function render() {
   drawFlag(cx);
   if (!finished) drawDoorArrow(cx);
   drawClocks(cx);
+  drawBoards(cx);
 
   for (const d of dust) {
     ctx.fillStyle = d.color || '#d6dbe4';
@@ -1542,9 +1685,10 @@ function render() {
   ctx.fillRect(Math.round(player.x - cx) + 4, GROUND_Y, 10, 2);
 
   const blinkOut = player.invuln > 0 && Math.floor(clock * 16) % 2;
+  const riding = player.board > 0;
   const img = courierFrame();
   const px = Math.round(player.x) - cx;
-  const py = Math.round(player.y);
+  const py = Math.round(player.y) - (riding ? 3 : 0);
   if (blinkOut) {
     // skip a frame: blinking after a bump
   } else if (player.facing < 0) {
@@ -1555,6 +1699,7 @@ function render() {
   } else {
     ctx.drawImage(img, px, py);
   }
+  if (riding && !blinkOut) ctx.drawImage(SKATEBOARD, px + 1, py + 23);
 
   for (const s of steam) {
     ctx.fillStyle = s.life > 0.5 ? 'rgba(244,244,244,0.8)' : 'rgba(244,244,244,0.4)';
@@ -1567,6 +1712,7 @@ function render() {
   }
 
   drawProgressBar();
+  drawBoardTimer();
 }
 
 // ---------- Loop and scaling ----------
