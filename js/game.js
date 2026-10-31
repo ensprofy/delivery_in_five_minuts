@@ -530,6 +530,7 @@ function respawn() {
   Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
   awayFromBase = false;
   puff(player.x + 9, player.y + 24, 8);
+  Sound.resetTempo();
   beep(880, 220, 0.25, 'square', 0.05);
 }
 

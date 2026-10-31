@@ -100,24 +100,35 @@ const Sound = (() => {
 
   // ---------- Music ----------
 
-  const BPM = 140;
-  const EIGHTH = 60 / BPM / 2;
+  // A tense chase in A minor. The tempo climbs a little every time the loop
+  // comes round, so the music keeps pushing the player to hurry.
+  const START_BPM = 160;
+  const BPM_STEP = 6;   // added on each loop
+  const MAX_BPM = 196;
+  let bpm = START_BPM;
+  const sixteenth = () => 60 / bpm / 4;
 
   // Melody in eighth notes: a note name starts a note, '-' holds it, '.' is a rest.
+  // Repeated stabs, G# leading notes, and a chromatic run that throws you back to the top.
   const LEAD = [
-    'E5 . G5 E5 C5 . D5 E5', 'A4 . C5 E5 D5 C5 A4 .',
-    'F4 A4 C5 F5 E5 - C5 .', 'D5 - B4 G4 B4 D5 G5 -',
-    'E5 . G5 E5 C5 . D5 E5', 'A5 - G5 E5 C5 D5 E5 .',
-    'F5 E5 D5 C5 A4 C5 D5 .', 'B4 - D5 - G5 - - .',
-    'A4 C5 F5 . A5 G5 F5 .', 'G5 F5 D5 . B4 D5 G5 .',
-    'G5 - E5 - B4 - E5 G5', 'A5 - E5 C5 A4 . C5 E5',
-    'F5 . A5 . G5 F5 E5 D5', 'D5 E5 F5 G5 - . B4 D5',
-    'C6 - G5 E5 G5 - E5 C5', 'C5 . G4 . C5 - - .',
+    'E5 E5 . E5 F5 E5 D5 C5', 'B4 C5 D5 E5 - . A4 .',
+    'F5 F5 . F5 G5 F5 E5 D5', 'E5 - G#4 B4 E5 - D5 B4',
+    'E5 E5 . E5 F5 E5 D5 C5', 'A5 G#5 A5 B5 C6 - B5 A5',
+    'F5 E5 D5 F5 A5 - F5 D5', 'G#5 - E5 - B4 - G#4 B4',
+    'D5 . F5 . A5 G#5 A5 .', 'C6 . B5 . A5 E5 C5 .',
+    'D5 . F5 . A5 G#5 A5 B5', 'C6 B5 A5 G#5 F5 E5 D5 B4',
+    'A4 C5 F5 A5 G5 F5 E5 F5', 'G5 F5 E5 D5 B4 D5 G5 B5',
+    'G#5 B5 E6 - D6 B5 G#5 E5', 'E5 F5 F#5 G5 G#5 A5 A#5 B5',
   ].join(' ').split(' ');
 
-  // One chord root per bar; the bass bounces between root and octave.
-  const ROOTS = ['C3', 'A2', 'F2', 'G2', 'C3', 'A2', 'F2', 'G2',
-                 'F2', 'G2', 'E2', 'A2', 'F2', 'G2', 'C3', 'C3'];
+  // Chord per bar: root note and whether it is minor.
+  const CHORDS = [
+    ['A2', 1], ['A2', 1], ['F2', 0], ['E2', 0], ['A2', 1], ['A2', 1], ['D2', 1], ['E2', 0],
+    ['D2', 1], ['A2', 1], ['D2', 1], ['E2', 0], ['F2', 0], ['G2', 0], ['E2', 0], ['E2', 0],
+  ];
+  const STEPS = CHORDS.length * 16; // sixteenth notes in the loop
+
+  const BASS = [0, 0, 12, 0, 0, 12, 0, 12, 0, 0, 12, 0, 0, 12, 0, 12]; // pumping octaves
 
   const NOTE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
   function freq(name) {
@@ -125,6 +136,7 @@ const Sound = (() => {
     const midi = 12 * (Number(m[3]) + 1) + NOTE[m[1]] + (m[2] ? 1 : 0);
     return 440 * 2 ** ((midi - 69) / 12);
   }
+  const shift = (f, semis) => f * 2 ** (semis / 12);
 
   // Length of each lead note in eighths, counting the holds after it
   function noteLength(i) {
@@ -137,27 +149,53 @@ const Sound = (() => {
   let nextTime = 0;
   let stepIndex = 0;
 
-  function playStep(i, t) {
-    const lead = LEAD[i];
-    if (lead !== '.' && lead !== '-') {
-      osc('pulse', freq(lead), t, noteLength(i) * EIGHTH * 0.95, 0.09, musicBus);
-    }
-    const bar = Math.floor(i / 8);
-    const beat = i % 8;
-    const root = freq(ROOTS[bar]) * 2; // up an octave so small speakers can play it
-    osc('triangle', beat % 2 ? root * 2 : root, t, EIGHTH * 0.9, 0.2, musicBus);
+  function playStep(s, t) {
+    const sx = sixteenth();
+    const bar = Math.floor(s / 16);
+    const pos = s % 16;
+    const [rootName, minor] = CHORDS[bar];
+    const root = freq(rootName) * 2; // up an octave so small speakers can play it
 
-    if (beat === 0 || beat === 4) osc('square', 220, t, 0.08, 0.08, musicBus, 60);     // kick
-    if (beat === 2 || beat === 6) hiss(t, 0.1, 0.3, musicBus, 'bandpass', 2200);     // snare
-    hiss(t + EIGHTH / 2, 0.03, 0.12, musicBus, 'highpass', 6000);                    // hi-hat
+    // Lead, one token per eighth
+    if (pos % 2 === 0) {
+      const i = s / 2;
+      const lead = LEAD[i];
+      if (lead !== '.' && lead !== '-') {
+        osc('pulse', freq(lead), t, noteLength(i) * sx * 2 * 0.9, 0.085, musicBus);
+      }
+    }
+
+    // Bass: short pumping sixteenths
+    osc('triangle', shift(root, BASS[pos]), t, sx * 0.8, 0.2, musicBus);
+
+    // Quiet fast arpeggio of the chord, two octaves up: busy, restless
+    const arp = [0, minor ? 3 : 4, 7, 12][pos % 4];
+    osc('square', shift(root * 4, arp), t, sx * 0.6, 0.018, musicBus);
+
+    // Drums: kick on every beat, snare on 2 and 4, hi-hat on every sixteenth
+    if (pos % 4 === 0) osc('square', 220, t, 0.07, 0.09, musicBus, 55);
+    if (pos === 4 || pos === 12) hiss(t, 0.09, 0.32, musicBus, 'bandpass', 2300);
+    hiss(t, 0.02, pos % 2 ? 0.07 : 0.12, musicBus, 'highpass', 7000);
+
+    // Clock ticking on the off-beats: tick ... tock ...
+    if (pos % 4 === 2) osc('triangle', pos % 8 === 2 ? 2600 : 2000, t, 0.025, 0.06, musicBus);
+
+    // Last bar: a rising siren into the next loop
+    if (bar === CHORDS.length - 1 && pos === 0) {
+      osc('square', 440, t, sx * 15, 0.025, musicBus, 1760);
+    }
   }
 
   // Schedules notes a little ahead of time, so the beat stays steady even if a frame is slow.
   function schedule() {
     while (nextTime < ctx.currentTime + 0.15) {
       playStep(stepIndex, nextTime);
-      stepIndex = (stepIndex + 1) % LEAD.length;
-      nextTime += EIGHTH;
+      nextTime += sixteenth();
+      stepIndex++;
+      if (stepIndex === STEPS) {
+        stepIndex = 0;
+        bpm = Math.min(MAX_BPM, bpm + BPM_STEP);
+      }
     }
   }
 
@@ -166,8 +204,12 @@ const Sound = (() => {
     if (ctx.state === 'suspended') ctx.resume();
     nextTime = ctx.currentTime + 0.1;
     stepIndex = 0;
+    bpm = START_BPM;
     musicTimer = setInterval(schedule, 25);
   }
+
+  // Back to the starting tempo, e.g. after returning to the pizzeria
+  function resetTempo() { bpm = START_BPM; }
 
   // ---------- Switches ----------
 
@@ -188,7 +230,7 @@ const Sound = (() => {
   });
 
   return {
-    beep, step, jump, land, startMusic,
+    beep, step, jump, land, startMusic, resetTempo,
     toggleMute() { setMuted(!muted); return !muted; },
     toggleMusic() { setMusic(!musicOn); return musicOn; },
   };
