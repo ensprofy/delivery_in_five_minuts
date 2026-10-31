@@ -22,7 +22,7 @@ const PHYS = {
 };
 
 // Skateboard tuning: faster, rolls further, takes a moment to push up to speed.
-// The board lasts until you lose it; once per jump you can kick off the air again.
+// The board lasts until you lose it, and each board has one mid-air double jump.
 const BOARD = { maxSpeed: 175, accel: 520, friction: 240, doubleJump: 0.95 };
 
 const canvas = document.getElementById('game');
@@ -974,7 +974,7 @@ const player = {
   stun: 0,       // seconds without control after bumping into someone
   invuln: 0,     // seconds of blinking safety after a bump or fall
   board: 0,      // 1 while riding the skateboard
-  doubleUsed: false, // the board's mid-air jump has been spent
+  doubleUsed: false, // this board's one double jump has been spent
   flip: 0,       // seconds left of the kickflip animation
 };
 
@@ -1041,7 +1041,7 @@ function update(dt) {
     puff(p.x + 9, p.y + 24, 4);
     if (p.board > 0) Sound.ollie(); else Sound.jump();
   } else if (wantsJump && p.board > 0 && !p.grounded && !p.doubleUsed && p.stun <= 0) {
-    // Double jump on the skateboard: kick off the air once, with a kickflip
+    // Double jump on the skateboard: one per board, with a kickflip
     p.vy = -PHYS.jumpSpeed * BOARD.doubleJump;
     p.doubleUsed = true;
     p.flip = 0.3;
@@ -1049,7 +1049,6 @@ function update(dt) {
     puff(p.x + 9, p.y + 24, 3);
     Sound.kickflip();
   }
-  if (p.grounded) p.doubleUsed = false;
   p.flip = Math.max(0, p.flip - dt);
   if (p.vy >= 0) p.bounced = false;
   if (!keys.jump && !p.bounced && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
@@ -1104,9 +1103,6 @@ function update(dt) {
     if (p.board > 0) Sound.boardLand(); else Sound.land(fallSpeed > 250);
     p.landTime = p.board > 0 ? 0 : fallSpeed > 250 ? 0.14 : 0.09;
   }
-  // The board only rolls on the street: land on boxes, an awning or a balcony
-  // and you step off it there.
-  if (p.board > 0 && p.grounded && p.y + p.oy + p.h < GROUND_Y - 1) loseBoard('step');
   updateBoards(dt);
   p.landTime = Math.max(0, p.landTime - dt);
 
@@ -1238,7 +1234,6 @@ function loseBoard(reason) {
   });
   Sound.boardLose(crash);
   if (crash) toast('БАХ!');
-  else if (reason === 'step') toast('СКЕЙТ ВНИЗУ');
 }
 
 function overGround(x) {
@@ -1258,7 +1253,7 @@ function updateBoards(dt) {
     if (touching && b.armed && p.board <= 0 && !finished) {
       b.taken = true;
       p.board = 1;
-      p.doubleUsed = !p.grounded;
+      p.doubleUsed = false; // a fresh board brings a fresh double jump
       toast('СКЕЙТ!');
       Sound.boardGet();
     }
@@ -1310,8 +1305,8 @@ function drawTurnedBoard(cx, cy, angle) {
   ctx.restore();
 }
 
-// While riding: a little board under the stage name, and an arrow that is lit
-// while the mid-air double jump is still available.
+// While riding: a little board under the stage name, and an arrow that stays lit
+// until this board's one double jump is used.
 function drawBoardHud() {
   if (player.board <= 0) return;
   ctx.fillStyle = 'rgba(26,28,44,0.6)';
