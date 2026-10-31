@@ -2,7 +2,8 @@
 
 const VIEW_W = 320;
 const VIEW_H = 180;
-const WORLD_W = 1280;
+const WORLD_W = 16000;     // about 1 km of street
+const PX_PER_METRE = 16;
 const GROUND_Y = 152;
 const STEP = 1 / 60;
 
@@ -26,32 +27,70 @@ ctx.imageSmoothingEnabled = false;
 
 // ---------- Level ----------
 
-const solids = [{ x: -16, y: GROUND_Y, w: WORLD_W + 32, h: 64 }];
-const crates = [
-  [200, 136], [216, 136], [216, 120],
-  [420, 136],
-  [600, 136], [616, 136], [632, 136], [616, 120], [632, 120], [632, 104],
-  [980, 136], [996, 136],
-  [1140, 136], [1140, 120],
-].map(([x, y]) => ({ x, y, w: 16, h: 16 }));
-solids.push(...crates);
-// World edges
-solids.push({ x: -16, y: -200, w: 16, h: 400 }, { x: WORLD_W, y: -200, w: 16, h: 400 });
-
-// Awnings: you can jump up through them and land on top.
-const awnings = [
-  [296, 108, 48], [480, 100, 64], [700, 92, 48], [770, 66, 48],
-  [880, 108, 64], [1050, 92, 48],
-].map(([x, y, w]) => ({ x, y, w, h: 4 }));
-
-// ---------- Art ----------
-
 function rng(seed) {
   return () => {
     seed = (seed * 1664525 + 1013904223) >>> 0;
     return seed / 4294967296;
   };
 }
+
+
+// The recipient's house at the far end of the street.
+const DEST = { x: WORLD_W - 300, w: 176 };
+DEST.doorX = DEST.x + 120; // centre of the front door: the delivery spot
+
+// The first stretch is hand-made; after that obstacles are generated.
+const crateList = [
+  [200, 136], [216, 136], [216, 120],
+  [420, 136],
+  [600, 136], [616, 136], [632, 136], [616, 120], [632, 120], [632, 104],
+  [980, 136], [996, 136],
+  [1140, 136], [1140, 120],
+];
+const awningList = [
+  [296, 108, 48], [480, 100, 64], [700, 92, 48], [770, 66, 48],
+  [880, 108, 64], [1050, 92, 48],
+];
+
+(function generateObstacles() {
+  const r = rng(2024);
+  // Crate patterns as [dx, height in crates] columns. Nothing is taller than a
+  // jump unless there is a step in front of it.
+  const PATTERNS = [
+    [[0, 1]],
+    [[0, 1], [16, 1]],
+    [[0, 2]],
+    [[0, 1], [16, 2]],
+    [[0, 1], [16, 2], [32, 3]],
+    [[0, 2], [16, 1]],
+    [[0, 1], [16, 2], [32, 2], [48, 1]],
+  ];
+  let x = 1300;
+  while (x < DEST.x - 260) {
+    const pattern = PATTERNS[Math.floor(r() * PATTERNS.length)];
+    for (const [dx, h] of pattern) {
+      for (let k = 0; k < h; k++) crateList.push([x + dx, 136 - k * 16]);
+    }
+    const width = pattern[pattern.length - 1][0] + 16;
+    // Sometimes an awning to run along above the crates
+    if (r() < 0.45) {
+      const aw = 48 + Math.floor(r() * 3) * 16;
+      awningList.push([x + width + 24 + Math.floor(r() * 40), 88 + Math.floor(r() * 3) * 10, aw]);
+    }
+    x += width + 120 + Math.floor(r() * 160);
+  }
+})();
+
+const solids = [{ x: -16, y: GROUND_Y, w: WORLD_W + 32, h: 64 }];
+const crates = crateList.map(([x, y]) => ({ x, y, w: 16, h: 16 }));
+solids.push(...crates);
+// World edges
+solids.push({ x: -16, y: -200, w: 16, h: 400 }, { x: WORLD_W, y: -200, w: 16, h: 400 });
+
+// Awnings: you can jump up through them and land on top.
+const awnings = awningList.map(([x, y, w]) => ({ x, y, w, h: 4 }));
+
+// ---------- Art ----------
 
 function layer(w, h, draw) {
   const c = document.createElement('canvas');
@@ -211,6 +250,72 @@ function drawPizzeria(g) {
   g.fillRect(x + 115, 136, 2, 2);
 }
 
+// The house the pizza is going to.
+function drawDestination(g) {
+  const { x, w } = DEST;
+  const top = 64;
+  // Stepped roof
+  g.fillStyle = '#1a1c2c';
+  for (let i = 0; i < 6; i++) g.fillRect(x - 6 + i * 8, top - 6 - i * 4, w + 12 - i * 16, 6);
+  g.fillStyle = '#8e2434';
+  for (let i = 0; i < 6; i++) g.fillRect(x - 5 + i * 8, top - 5 - i * 4, w + 10 - i * 16, 4);
+  // Walls
+  g.fillStyle = '#7cc0c8';
+  g.fillRect(x, top, w, GROUND_Y - top);
+  g.fillStyle = '#5e9ea6';
+  g.fillRect(x, top, w, 2);
+  g.fillRect(x + w - 3, top, 3, GROUND_Y - top);
+  for (let wy = top + 6; wy < GROUND_Y; wy += 6) g.fillRect(x, wy, w - 3, 1); // siding
+  // Windows with curtains; someone is waiting in the left one
+  [[x + 14, 78], [x + 60, 78], [x + 14, 112], [x + 60, 112]].forEach(([wx, wy], i) => {
+    g.fillStyle = '#1a1c2c';
+    g.fillRect(wx - 1, wy - 1, 26, 24);
+    g.fillStyle = '#f7d57a';
+    g.fillRect(wx, wy, 24, 22);
+    g.fillStyle = '#d23c3c';
+    g.fillRect(wx, wy, 5, 22);
+    g.fillRect(wx + 19, wy, 5, 22);
+    if (i === 2) {
+      g.fillStyle = '#1a1c2c';
+      g.fillRect(wx + 9, wy + 6, 6, 6);
+      g.fillRect(wx + 7, wy + 12, 10, 10);
+    }
+    g.fillStyle = '#5e9ea6';
+    g.fillRect(wx - 2, wy + 22, 28, 2);
+  });
+  // Front door with the house number
+  const dx = DEST.doorX - 11;
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(dx - 3, 104, 28, 48);
+  g.fillStyle = '#f4f4f4';
+  g.fillRect(dx - 2, 105, 26, 47);
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(dx, 108, 22, 44);
+  g.fillStyle = '#3b5dc9';
+  g.fillRect(dx + 1, 109, 20, 43);
+  g.fillStyle = '#29366f';
+  g.fillRect(dx + 4, 113, 14, 14);
+  g.fillRect(dx + 4, 131, 14, 16);
+  g.fillStyle = '#f7d51d';
+  g.fillRect(dx + 16, 132, 2, 2);
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(dx + 3, 92, 17, 10);
+  g.fillStyle = '#f4f4f4';
+  g.fillRect(dx + 4, 93, 15, 8);
+  pixelText(g, '42', dx + 8, 95, '#1a1c2c');
+  // Lamp by the door
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(dx + 27, 110, 6, 8);
+  g.fillStyle = '#f7d51d';
+  g.fillRect(dx + 28, 111, 4, 6);
+  // Mailbox
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(x + w - 22, 128, 3, 24);
+  g.fillRect(x + w - 27, 120, 13, 9);
+  g.fillStyle = '#d23c3c';
+  g.fillRect(x + w - 26, 121, 11, 7);
+}
+
 // Street facades, drawn at full scroll speed behind the courier.
 const street = layer(WORLD_W, VIEW_H, (g) => {
   const r = rng(42);
@@ -225,8 +330,9 @@ const street = layer(WORLD_W, VIEW_H, (g) => {
   drawPizzeria(g);
   let x = PIZZERIA.x + PIZZERIA.w;
   let n = 0;
-  while (x < WORLD_W) {
-    const bw = 96 + Math.floor(r() * 48);
+  while (x < DEST.x) {
+    let bw = 96 + Math.floor(r() * 48);
+    if (DEST.x - x - bw < 96) bw = DEST.x - x; // last shop stretches to meet the house
     const top = 20 + Math.floor(r() * 40);
     const [wall, shade] = colors[n % colors.length];
     g.fillStyle = wall;
@@ -275,6 +381,12 @@ const street = layer(WORLD_W, VIEW_H, (g) => {
     x += bw;
     n++;
   }
+  drawDestination(g);
+  // A plain wall after the house, to the end of the street
+  g.fillStyle = '#6b6f86';
+  g.fillRect(DEST.x + DEST.w, 70, WORLD_W - DEST.x - DEST.w, GROUND_Y - 70);
+  g.fillStyle = '#585b70';
+  g.fillRect(DEST.x + DEST.w, 70, WORLD_W - DEST.x - DEST.w, 3);
   // Sidewalk
   g.fillStyle = '#9aa3b5';
   g.fillRect(0, GROUND_Y, WORLD_W, 10);
@@ -329,6 +441,10 @@ const KEYMAP = {
 
 function press(action) {
   if (!started) { start(); return; }
+  if (finished) {
+    if (action === 'jump' && !document.getElementById('result').hidden) restart();
+    return;
+  }
   if (action === 'jump' && !keys.jump) jumpPressedAt = clock;
   keys[action] = true;
 }
@@ -336,7 +452,8 @@ function press(action) {
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') { toast(Sound.toggleMute() ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ'); return; }
   if (e.code === 'KeyN') { toast(Sound.toggleMusic() ? 'МУЗЫКА ВКЛ' : 'МУЗЫКА ВЫКЛ'); return; }
-  if (e.code === 'KeyR' && started) { respawn(); return; }
+  if (e.code === 'KeyR' && started && !finished) { respawn(); return; }
+  if (e.code === 'Enter' && finished && !document.getElementById('result').hidden) { restart(); return; }
   const action = KEYMAP[e.code];
   if (!action) { if (!started) start(); return; }
   e.preventDefault();
@@ -369,7 +486,7 @@ document.querySelector('[data-music]').addEventListener('pointerdown', (e) => {
 });
 document.querySelector('[data-base]').addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  if (started) respawn(); else start();
+  if (!started) start(); else if (!finished) respawn();
 });
 
 function start() {
@@ -499,7 +616,7 @@ function update(dt) {
   p.lastPose = pose;
 
   // Steam from the hot pizza in the backpack
-  if (Math.random() < dt * 3) {
+  if (timeLeft > 0 && Math.random() < dt * 3) {
     const bagX = p.facing > 0 ? p.x + 2 : p.x + 13;
     steam.push({ x: bagX + Math.random() * 3, y: p.y + 6, life: 0.8 + Math.random() * 0.4 });
   }
@@ -530,7 +647,6 @@ function respawn() {
   Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
   awayFromBase = false;
   puff(player.x + 9, player.y + 24, 8);
-  Sound.resetTempo();
   beep(880, 220, 0.25, 'square', 0.05);
 }
 
@@ -595,6 +711,180 @@ function drawFlag(cx) {
   }
 }
 
+// ---------- Delivery run ----------
+
+const TIME_LIMIT = 300; // five minutes
+const RUN_START = CHECKPOINT.x + 9;
+let timeLeft = TIME_LIMIT;
+let finished = false;
+let lastWholeSecond = TIME_LIMIT;
+const confetti = [];
+
+const timerEl = document.getElementById('timer');
+const distEl = document.getElementById('dist');
+
+function distanceLeft() {
+  return Math.max(0, DEST.doorX - (player.x + 9));
+}
+
+function progress() {
+  return Math.max(0, Math.min(1, (player.x + 9 - RUN_START) / (DEST.doorX - RUN_START)));
+}
+
+function formatTime(t) {
+  const s = Math.max(0, Math.ceil(t));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function updateRun(dt) {
+  if (finished) return;
+  timeLeft = Math.max(0, timeLeft - dt);
+  Sound.setUrgency(1 - timeLeft / TIME_LIMIT);
+
+  // Clock ticks through the last ten seconds
+  const whole = Math.ceil(timeLeft);
+  if (whole !== lastWholeSecond) {
+    lastWholeSecond = whole;
+    if (whole <= 10 && whole > 0) Sound.tick(whole <= 5);
+  }
+
+  if (Math.abs(player.x + 9 - DEST.doorX) < 8 && player.grounded) finish(true);
+  else if (timeLeft <= 0) finish(false);
+}
+
+function finish(delivered) {
+  finished = true;
+  keys.left = keys.right = keys.jump = false;
+  player.vx = 0;
+  Sound.stopMusic();
+  const box = document.getElementById('result');
+  box.classList.toggle('fail', !delivered);
+  if (delivered) {
+    Sound.fanfare();
+    document.getElementById('result-title').textContent = 'ДОСТАВЛЕНО!';
+    document.getElementById('result-text').textContent = `Осталось ${formatTime(timeLeft)}. Пицца ещё горячая!`;
+    for (let i = 0; i < 40; i++) {
+      confetti.push({
+        x: DEST.doorX, y: 100, vx: (Math.random() - 0.5) * 160, vy: -80 - Math.random() * 120,
+        life: 1.5 + Math.random(), color: ['#f7d51d', '#d23c3c', '#3e9b4f', '#3b5dc9', '#f4f4f4'][i % 5],
+      });
+    }
+  } else {
+    Sound.fail();
+    document.getElementById('result-title').textContent = 'ВРЕМЯ ВЫШЛО';
+    document.getElementById('result-text').textContent =
+      `До дома оставалось ${Math.ceil(distanceLeft() / PX_PER_METRE)} м. Пицца остыла.`;
+  }
+  setTimeout(() => { if (finished) box.hidden = false; }, delivered ? 900 : 600);
+}
+
+function restart() {
+  finished = false;
+  document.getElementById('result').hidden = true;
+  timeLeft = TIME_LIMIT;
+  lastWholeSecond = TIME_LIMIT;
+  confetti.length = 0;
+  Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
+  awayFromBase = false;
+  camX = 0;
+  Sound.startMusic();
+  beep(440, 880, 0.12);
+}
+
+function updateConfetti(dt) {
+  for (let i = confetti.length - 1; i >= 0; i--) {
+    const c = confetti[i];
+    c.life -= dt;
+    c.vy += 220 * dt;
+    c.x += c.vx * dt;
+    c.y += c.vy * dt;
+    if (c.life <= 0 || c.y > GROUND_Y) confetti.splice(i, 1);
+  }
+}
+
+function updateHud() {
+  timerEl.textContent = formatTime(timeLeft);
+  timerEl.classList.toggle('hurry', timeLeft <= 60 && timeLeft > 30);
+  timerEl.classList.toggle('panic', timeLeft <= 30 && !finished);
+  distEl.textContent = `${Math.ceil(distanceLeft() / PX_PER_METRE)} м`;
+}
+
+// Mercury colour: cold blue far away, through yellow, to hot red at the door.
+function heat(p) {
+  const stops = [[59, 93, 201], [247, 213, 29], [255, 90, 74]];
+  const k = p < 0.5 ? p * 2 : (p - 0.5) * 2;
+  const [a, b] = p < 0.5 ? [stops[0], stops[1]] : [stops[1], stops[2]];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`;
+}
+
+// Thermometer on the left: fills up and warms as the courier nears the house.
+function drawThermometer() {
+  const p = progress();
+  const x = 8;
+  const top = 30;
+  const bottom = 100;
+  const color = heat(p);
+  // Dark backing so the gauge reads on any building
+  ctx.fillStyle = 'rgba(26,28,44,0.5)';
+  ctx.fillRect(1, 10, 36, 114);
+  // House icon at the top: the goal
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x - 3, 19, 13, 9);
+  ctx.fillRect(x - 1, 15, 9, 4);
+  ctx.fillRect(x + 1, 13, 5, 2);
+  ctx.fillStyle = '#8e2434';
+  ctx.fillRect(x - 2, 19, 11, 2);
+  ctx.fillRect(x, 16, 7, 3);
+  ctx.fillStyle = '#7cc0c8';
+  ctx.fillRect(x - 2, 21, 11, 6);
+  ctx.fillStyle = '#3b5dc9';
+  ctx.fillRect(x + 2, 23, 3, 4);
+  // Glass tube and bulb
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x - 1, top - 1, 9, bottom - top + 2);
+  ctx.fillRect(x - 3, bottom, 13, 11);
+  ctx.fillRect(x - 2, bottom + 11, 11, 2);
+  ctx.fillStyle = '#dfe7f1';
+  ctx.fillRect(x, top, 7, bottom - top + 1);
+  ctx.fillRect(x - 2, bottom + 1, 11, 9);
+  ctx.fillRect(x - 1, bottom + 10, 9, 2);
+  // Scale marks every 10%
+  ctx.fillStyle = '#1a1c2c';
+  for (let i = 1; i < 10; i++) {
+    const y = Math.round(bottom - (bottom - top) * (i / 10));
+    ctx.fillRect(x + 8, y, i % 5 ? 2 : 4, 1);
+  }
+  // Mercury
+  const level = Math.round(bottom - (bottom - top - 2) * p);
+  const glow = p > 0.9 && Math.floor(clock * 6) % 2;
+  ctx.fillStyle = glow ? '#ffc4b8' : color; // pulses when the house is close
+  ctx.fillRect(x + 2, level, 3, bottom - level + 2);
+  ctx.fillStyle = color;
+  ctx.fillRect(x - 1, bottom + 2, 9, 7);
+  ctx.fillRect(x, bottom + 9, 7, 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillRect(x, bottom + 3, 2, 3); // shine on the bulb
+}
+
+// Bouncing arrow over the recipient's door
+function drawDoorArrow(cx) {
+  const x = DEST.doorX - cx;
+  if (x < -10 || x > VIEW_W + 10) return;
+  const y = 74 + Math.round(Math.abs(Math.sin(clock * 5)) * 4);
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x - 3, y - 1, 7, 7);
+  ctx.fillRect(x - 6, y + 5, 13, 2);
+  ctx.fillRect(x - 5, y + 7, 11, 2);
+  ctx.fillRect(x - 3, y + 9, 7, 2);
+  ctx.fillRect(x - 1, y + 11, 3, 2);
+  ctx.fillStyle = '#f7d51d';
+  ctx.fillRect(x - 2, y, 5, 6);
+  ctx.fillRect(x - 5, y + 6, 11, 1);
+  ctx.fillRect(x - 4, y + 7, 9, 2);
+  ctx.fillRect(x - 2, y + 9, 5, 2);
+  ctx.fillRect(x, y + 11, 1, 1);
+}
+
 // ---------- Render ----------
 
 let camX = 0;
@@ -628,9 +918,10 @@ function render() {
   tiled(midCity, 0.5);
   ctx.drawImage(street, cx, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
 
-  for (const a of awnings) drawAwning(a, cx);
-  for (const c of crates) ctx.drawImage(crateImg, c.x - cx, c.y);
+  for (const a of awnings) if (a.x + a.w > cx && a.x < cx + VIEW_W) drawAwning(a, cx);
+  for (const c of crates) if (c.x + 16 > cx && c.x < cx + VIEW_W) ctx.drawImage(crateImg, c.x - cx, c.y);
   drawFlag(cx);
+  if (!finished) drawDoorArrow(cx);
 
   ctx.fillStyle = '#d6dbe4';
   for (const d of dust) ctx.fillRect(Math.round(d.x - cx), Math.round(d.y), 2, 2);
@@ -655,6 +946,13 @@ function render() {
     ctx.fillStyle = s.life > 0.5 ? 'rgba(244,244,244,0.8)' : 'rgba(244,244,244,0.4)';
     ctx.fillRect(Math.round(s.x - cx), Math.round(s.y), 1, 1);
   }
+
+  for (const c of confetti) {
+    ctx.fillStyle = c.color;
+    ctx.fillRect(Math.round(c.x - cx), Math.round(c.y), 2, 2);
+  }
+
+  drawThermometer();
 }
 
 // ---------- Loop and scaling ----------
@@ -666,11 +964,12 @@ function frame(now) {
   acc += Math.min(0.1, (now - last) / 1000);
   last = now;
   while (acc >= STEP) {
-    if (started) { update(STEP); updateCheckpoint(STEP); }
+    if (started) { update(STEP); updateCheckpoint(STEP); updateRun(STEP); updateConfetti(STEP); }
     else clock += STEP;
     acc -= STEP;
   }
   render();
+  updateHud();
   requestAnimationFrame(frame);
 }
 

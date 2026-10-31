@@ -100,10 +100,9 @@ const Sound = (() => {
 
   // ---------- Music ----------
 
-  // A tense chase in A minor. The tempo climbs a little every time the loop
-  // comes round, so the music keeps pushing the player to hurry.
+  // A tense chase in A minor. The tempo follows the delivery timer: it starts
+  // at START_BPM and climbs to MAX_BPM as the five minutes run out.
   const START_BPM = 160;
-  const BPM_STEP = 6;   // added on each loop
   const MAX_BPM = 196;
   let bpm = START_BPM;
   const sixteenth = () => 60 / bpm / 4;
@@ -192,10 +191,7 @@ const Sound = (() => {
       playStep(stepIndex, nextTime);
       nextTime += sixteenth();
       stepIndex++;
-      if (stepIndex === STEPS) {
-        stepIndex = 0;
-        bpm = Math.min(MAX_BPM, bpm + BPM_STEP);
-      }
+      if (stepIndex === STEPS) stepIndex = 0;
     }
   }
 
@@ -208,8 +204,44 @@ const Sound = (() => {
     musicTimer = setInterval(schedule, 25);
   }
 
-  // Back to the starting tempo, e.g. after returning to the pizzeria
-  function resetTempo() { bpm = START_BPM; }
+  function stopMusic() {
+    clearInterval(musicTimer);
+    musicTimer = null;
+  }
+
+  // 0 = plenty of time, 1 = time is up
+  function setUrgency(f) {
+    bpm = START_BPM + (MAX_BPM - START_BPM) * Math.max(0, Math.min(1, f));
+  }
+
+  // ---------- Jingles ----------
+
+  // A loud clock tick for the last seconds; higher for the final five.
+  function tick(final) {
+    if (!init() || muted) return;
+    const t = ctx.currentTime;
+    osc('square', final ? 1760 : 1320, t, 0.06, 0.07, sfxBus);
+    hiss(t, 0.03, 0.2, sfxBus, 'highpass', 5000);
+  }
+
+  function playNotes(notes, gap, type, vol) {
+    if (!init() || muted) return;
+    const t = ctx.currentTime + 0.05;
+    notes.forEach((n, i) => {
+      if (n === '.') return;
+      osc(type, freq(n), t + i * gap, gap * 1.6, vol, sfxBus);
+    });
+  }
+
+  function fanfare() {
+    playNotes(['C5', 'E5', 'G5', 'C6', '.', 'G5', 'C6', '.', '.', 'E6'], 0.11, 'pulse', 0.09);
+    playNotes(['C4', '.', 'G4', '.', 'C5', '.', 'E4', '.', 'C4'], 0.11, 'triangle', 0.18);
+  }
+
+  function fail() {
+    playNotes(['E5', 'D#5', 'D5', 'C#5', '.', 'C5'], 0.22, 'pulse', 0.08);
+    playNotes(['A3', '.', 'G#3', '.', 'G3', '.', 'F#3'], 0.22, 'triangle', 0.16);
+  }
 
   // ---------- Switches ----------
 
@@ -230,7 +262,7 @@ const Sound = (() => {
   });
 
   return {
-    beep, step, jump, land, startMusic, resetTempo,
+    beep, step, jump, land, startMusic, stopMusic, setUrgency, tick, fanfare, fail,
     toggleMute() { setMuted(!muted); return !muted; },
     toggleMusic() { setMusic(!musicOn); return musicOn; },
   };

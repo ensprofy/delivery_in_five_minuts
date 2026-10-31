@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <main id="stage">
@@ -15,15 +15,24 @@
       <canvas id="game" width="320" height="180"></canvas>
 
       <div class="hud">
-        <span>ЭТАП 1</span>
-        <span class="hint">← → ходить · ПРОБЕЛ прыжок · R на базу · M звук · N музыка</span>
+        <span>ЭТАП 2</span>
       </div>
+      <div id="timer" class="timer">5:00</div>
+      <div id="dist" class="dist">1000 м</div>
+      <div class="hint">← → ходить · ПРОБЕЛ прыжок · R на базу · M звук · N музыка</div>
 
       <div id="toast" class="toast" aria-live="polite"></div>
 
       <div id="title" class="title">
         <h1>ДОСТАВКА<br>ЗА 5 МИНУТ</h1>
+        <p class="sub">Отнеси пиццу в дом №42 в конце улицы</p>
         <p class="blink">НАЖМИ ЛЮБУЮ КЛАВИШУ</p>
+      </div>
+
+      <div id="result" class="title result" hidden>
+        <h1 id="result-title"></h1>
+        <p id="result-text" class="sub"></p>
+        <p class="blink">ПРОБЕЛ — ЕЩЁ РАЗ</p>
       </div>
     </div>
   </main>
@@ -38,8 +47,8 @@
     <button class="pad-jump" data-action="jump" aria-label="Прыжок">A</button>
   </div>
 
-  <script src="js/audio.js?v=7"></script>
-  <script src="js/sprites.js?v=7"></script>
-  <script src="js/game.js?v=7"></script>
+  <script src="js/audio.js?v=8"></script>
+  <script src="js/sprites.js?v=8"></script>
+  <script src="js/game.js?v=8"></script>
 </body>
 </html>
