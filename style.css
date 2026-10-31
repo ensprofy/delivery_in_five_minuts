@@ -117,3 +117,34 @@ canvas {
 }
 
 .pad button.down { transform: translateY(3px); filter: brightness(0.85); }
+
+/* Short announcement, e.g. reaching the checkpoint */
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 28%;
+  transform: translate(-50%, 0);
+  font-size: calc(var(--px) * 7);
+  line-height: 1.4;
+  color: var(--yellow);
+  text-shadow: var(--px) var(--px) 0 var(--red), calc(var(--px) * 2) calc(var(--px) * 2) 0 var(--outline);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.toast.show { animation: toast 1.8s steps(12) forwards; }
+
+@keyframes toast {
+  0% { opacity: 0; transform: translate(-50%, calc(var(--px) * 8)); }
+  15%, 80% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, calc(var(--px) * -4)); }
+}
+
+.pad .pad-base {
+  width: 52px;
+  height: 52px;
+  font-size: 16px;
+  margin-left: auto;
+  margin-right: 16px;
+}

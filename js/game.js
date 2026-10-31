@@ -116,17 +116,99 @@ const GLYPHS = {
   A: '010101111101101', C: '111100100100111', F: '111100110100100',
   E: '111100110100111', S: '111100111001111', H: '101101111101101',
   O: '111101101101111', '2': '111001111100111', '4': '101101111001001',
-  ' ': '000000000000000',
+  B: '110101110101110', K: '101101110101101', R: '110101110101101',
+  T: '111010010010010', M: '101111111101101', Y: '101101010010010',
+  N: '110101101101101', D: '110101101101110', L: '100100100100111',
+  U: '101101101101111', ' ': '000000000000000',
 };
 
-function pixelText(g, text, x, y, color) {
+function pixelText(g, text, x, y, color, size = 1) {
   g.fillStyle = color;
   [...text].forEach((ch, i) => {
     const bits = GLYPHS[ch] || GLYPHS[' '];
     for (let p = 0; p < 15; p++) {
-      if (bits[p] === '1') g.fillRect(x + i * 4 + (p % 3), y + Math.floor(p / 3), 1, 1);
+      if (bits[p] === '1') g.fillRect(x + (i * 4 + (p % 3)) * size, y + Math.floor(p / 3) * size, size, size);
     }
   });
+}
+
+// The one pizzeria: the courier's base and the checkpoint.
+const PIZZERIA = { x: 0, w: 136 };
+const CHECKPOINT = { x: 104, flagX: 84 }; // respawn spot and the flagpole
+
+function drawPizzeria(g) {
+  const { x, w } = PIZZERIA;
+  const top = 44;
+  // Cream plaster with a red-brick base
+  g.fillStyle = '#efe0bd';
+  g.fillRect(x, top, w, GROUND_Y - top);
+  g.fillStyle = '#d6c399';
+  g.fillRect(x, top, w, 3);
+  g.fillRect(x + w - 3, top, 3, GROUND_Y - top);
+  g.fillStyle = '#a8432f';
+  g.fillRect(x, 140, w, 12);
+  g.fillStyle = '#7f3022';
+  for (let bx = x; bx < x + w; bx += 8) g.fillRect(bx + ((bx / 8) % 2) * 4, 145, 1, 7);
+  g.fillRect(x, 145, w, 1);
+  // Rooftop sign
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(x + 22, top - 22, 2, 22);
+  g.fillRect(x + w - 26, top - 22, 2, 22);
+  g.fillRect(x + 14, top - 26, w - 30, 18);
+  g.fillStyle = '#d23c3c';
+  g.fillRect(x + 15, top - 25, w - 32, 16);
+  pixelText(g, 'PIZZA', x + 31, top - 22, '#1a1c2c', 2);
+  pixelText(g, 'PIZZA', x + 30, top - 23, '#f7d51d', 2);
+  // Italian stripe under the roof
+  [['#3e9b4f', 0], ['#f4f4f4', 1], ['#d23c3c', 2]].forEach(([c, i]) => {
+    g.fillStyle = c;
+    g.fillRect(x, top + 3 + i * 2, w - 3, 2);
+  });
+  // Upper windows with flower boxes
+  for (let wx = x + 12; wx < x + w - 20; wx += 30) {
+    g.fillStyle = '#1a1c2c';
+    g.fillRect(wx - 1, 61, 18, 22);
+    g.fillStyle = '#5e7fb3';
+    g.fillRect(wx, 62, 16, 20);
+    g.fillStyle = '#3e9b4f';
+    g.fillRect(wx - 2, 83, 20, 3);
+    g.fillStyle = '#d23c3c';
+    for (let f = 0; f < 5; f++) g.fillRect(wx + f * 4, 81, 2, 2);
+  }
+  // Shop window glowing from the pizza oven
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(x + 8, 101, 60, 40);
+  g.fillStyle = '#f2a65a';
+  g.fillRect(x + 9, 102, 58, 38);
+  g.fillStyle = '#e8743b';
+  g.fillRect(x + 30, 116, 22, 24);
+  g.fillStyle = '#5a3a22';
+  g.fillRect(x + 28, 112, 26, 5);
+  g.fillStyle = '#f7d51d';
+  g.fillRect(x + 35, 126, 12, 8);
+  // Pizza drawn on the glass
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(x + 13, 106, 12, 12);
+  g.fillStyle = '#e2a95c';
+  g.fillRect(x + 14, 107, 10, 10);
+  g.fillStyle = '#f7d51d';
+  g.fillRect(x + 15, 108, 8, 8);
+  g.fillStyle = '#d23c3c';
+  [[16, 109], [20, 110], [17, 113], [21, 114]].forEach(([px, py]) => g.fillRect(x + px, py, 2, 2));
+  g.fillStyle = '#f2a65a';
+  g.fillRect(x + 19, 112, 5, 5); // missing slice
+  // Door with an OPEN plate
+  g.fillStyle = '#1a1c2c';
+  g.fillRect(x + 96, 112, 24, 40);
+  g.fillStyle = '#3e9b4f';
+  g.fillRect(x + 97, 113, 22, 39);
+  g.fillStyle = '#f7d57a';
+  g.fillRect(x + 100, 117, 16, 14);
+  g.fillStyle = '#d23c3c';
+  g.fillRect(x + 101, 121, 14, 6);
+  pixelText(g, 'OPEN', x + 101, 122, '#f4f4f4');
+  g.fillStyle = '#f7d51d';
+  g.fillRect(x + 115, 136, 2, 2);
 }
 
 // Street facades, drawn at full scroll speed behind the courier.
@@ -136,8 +218,12 @@ const street = layer(WORLD_W, VIEW_H, (g) => {
     ['#b0533c', '#8a3d2c'], ['#c9a86a', '#a3854f'], ['#6b8f71', '#4f6e55'],
     ['#9a6fa5', '#77517f'], ['#c77d4e', '#9e5e37'],
   ];
-  const signs = ['PIZZA', 'CAFE', 'SHOP', '24', 'PIZZA'];
-  let x = 0;
+  const signs = [
+    ['CAFE', '#29366f'], ['BOOKS', '#4f6e55'], ['MARKET', '#c06f12'],
+    ['SHOP', '#29366f'], ['BAKERY', '#77517f'], ['24', '#1a1c2c'],
+  ];
+  drawPizzeria(g);
+  let x = PIZZERIA.x + PIZZERIA.w;
   let n = 0;
   while (x < WORLD_W) {
     const bw = 96 + Math.floor(r() * 48);
@@ -179,11 +265,11 @@ const street = layer(WORLD_W, VIEW_H, (g) => {
     g.fillStyle = '#f7d51d';
     g.fillRect(x + bw - 16, 136, 2, 2);
     // Sign
-    const label = signs[n % signs.length];
+    const [label, signColor] = signs[n % signs.length];
     const sw = label.length * 4 + 5;
     g.fillStyle = '#1a1c2c';
     g.fillRect(x + 10, 103, sw + 2, 11);
-    g.fillStyle = label === 'PIZZA' ? '#d23c3c' : '#29366f';
+    g.fillStyle = signColor;
     g.fillRect(x + 11, 104, sw, 9);
     pixelText(g, label, x + 14, 106, '#f4f4f4');
     x += bw;
@@ -272,6 +358,7 @@ function press(action) {
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') { muted = !muted; return; }
+  if (e.code === 'KeyR' && started) { respawn(); return; }
   const action = KEYMAP[e.code];
   if (!action) { if (!started) start(); return; }
   e.preventDefault();
@@ -296,6 +383,10 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
   btn.addEventListener('pointercancel', release);
 });
 canvas.addEventListener('pointerdown', () => { if (!started) start(); });
+document.querySelector('[data-base]').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (started) respawn(); else start();
+});
 
 function start() {
   started = true;
@@ -306,7 +397,7 @@ function start() {
 // ---------- Courier ----------
 
 const player = {
-  x: 40, y: GROUND_Y - 24,
+  x: CHECKPOINT.x, y: GROUND_Y - 24,
   vx: 0, vy: 0,
   w: 10, h: 22, ox: 4, oy: 2, // hitbox inside the 18x24 sprite, centred on the body
   facing: 1,
@@ -438,6 +529,80 @@ function update(dt) {
   }
 }
 
+// ---------- Checkpoint ----------
+
+let awayFromBase = false; // set once the courier has walked off, so returning can be announced
+let flagCheer = 0;        // seconds left on the flag's celebration
+
+function respawn() {
+  puff(player.x + 9, player.y + 24, 8);
+  Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
+  awayFromBase = false;
+  puff(player.x + 9, player.y + 24, 8);
+  beep(880, 220, 0.25, 'square', 0.05);
+}
+
+function updateCheckpoint(dt) {
+  const d = Math.abs(player.x + 9 - CHECKPOINT.flagX);
+  if (d > 160) awayFromBase = true;
+  if (awayFromBase && d < 20) {
+    awayFromBase = false;
+    flagCheer = 1.2;
+    toast('КОНТРОЛЬНАЯ ТОЧКА');
+    beep(523, 784, 0.12);
+    setTimeout(() => beep(784, 1046, 0.18), 120);
+  }
+  flagCheer = Math.max(0, flagCheer - dt);
+}
+
+let toastTimer = 0;
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.classList.remove('show');
+  void el.offsetWidth; // restart the animation
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+function drawFlag(cx) {
+  const x = CHECKPOINT.flagX - cx;
+  const wave = Math.floor(clock * (flagCheer > 0 ? 12 : 4)) % 2;
+  const lift = flagCheer > 0 ? Math.round(Math.abs(Math.sin(clock * 14)) * 3) : 0;
+  // Pole and base
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x - 1, 108, 3, 44);
+  ctx.fillRect(x - 3, 149, 7, 3);
+  ctx.fillStyle = '#c1c7d4';
+  ctx.fillRect(x, 109, 1, 42);
+  ctx.fillStyle = '#f7d51d';
+  ctx.fillRect(x - 1, 105, 3, 3);
+  // Pennant: a pizza slice on red
+  const fy = 110 - lift;
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x + 2, fy - 1, 15 + wave, 12);
+  ctx.fillStyle = '#d23c3c';
+  ctx.fillRect(x + 2, fy, 14 + wave, 10);
+  ctx.fillStyle = '#b02f30';
+  ctx.fillRect(x + 2 + 7 + wave, fy + (wave ? 0 : 1), 7, 9 - (wave ? 0 : 1));
+  ctx.fillStyle = '#f7d51d';
+  ctx.fillRect(x + 5, fy + 2, 6, 2);
+  ctx.fillRect(x + 6, fy + 4, 4, 2);
+  ctx.fillRect(x + 7, fy + 6, 2, 2);
+  ctx.fillStyle = '#d23c3c';
+  ctx.fillRect(x + 7, fy + 2, 1, 1);
+  ctx.fillStyle = '#e2a95c';
+  ctx.fillRect(x + 5, fy + 1, 6, 1);
+  if (flagCheer > 0) {
+    ctx.fillStyle = '#f7d51d';
+    for (let i = 0; i < 4; i++) {
+      const a = clock * 6 + i * 1.57;
+      ctx.fillRect(Math.round(x + 9 + Math.cos(a) * 14), Math.round(fy + 5 + Math.sin(a) * 9), 1, 1);
+    }
+  }
+}
+
 // ---------- Render ----------
 
 let camX = 0;
@@ -473,6 +638,7 @@ function render() {
 
   for (const a of awnings) drawAwning(a, cx);
   for (const c of crates) ctx.drawImage(crateImg, c.x - cx, c.y);
+  drawFlag(cx);
 
   ctx.fillStyle = '#d6dbe4';
   for (const d of dust) ctx.fillRect(Math.round(d.x - cx), Math.round(d.y), 2, 2);
@@ -508,7 +674,7 @@ function frame(now) {
   acc += Math.min(0.1, (now - last) / 1000);
   last = now;
   while (acc >= STEP) {
-    if (started) update(STEP);
+    if (started) { update(STEP); updateCheckpoint(STEP); }
     else clock += STEP;
     acc -= STEP;
   }
