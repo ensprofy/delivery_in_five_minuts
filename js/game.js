@@ -22,7 +22,8 @@ const PHYS = {
 };
 
 // Skateboard tuning: faster, rolls further, takes a moment to push up to speed.
-// The board lasts until you lose it, and each board has one mid-air double jump.
+// The board lasts until you lose it. The first mid-air double jump is free; a
+// second one on the same board costs you the board.
 const BOARD = { maxSpeed: 175, accel: 520, friction: 240, doubleJump: 0.95 };
 
 const canvas = document.getElementById('game');
@@ -974,7 +975,7 @@ const player = {
   stun: 0,       // seconds without control after bumping into someone
   invuln: 0,     // seconds of blinking safety after a bump or fall
   board: 0,      // 1 while riding the skateboard
-  doubleUsed: false, // this board's one double jump has been spent
+  doubleUsed: false, // the free double jump on this board has been spent
   flip: 0,       // seconds left of the kickflip animation
 };
 
@@ -1040,14 +1041,20 @@ function update(dt) {
     jumpPressedAt = -1;
     puff(p.x + 9, p.y + 24, 4);
     if (p.board > 0) Sound.ollie(); else Sound.jump();
-  } else if (wantsJump && p.board > 0 && !p.grounded && !p.doubleUsed && p.stun <= 0) {
-    // Double jump on the skateboard: one per board, with a kickflip
+  } else if (wantsJump && p.board > 0 && !p.grounded && p.stun <= 0) {
+    // Double jump on the skateboard. The first one is free, with a kickflip; the
+    // second one still lifts you, but you kick off the board and it flies away.
     p.vy = -PHYS.jumpSpeed * BOARD.doubleJump;
-    p.doubleUsed = true;
-    p.flip = 0.3;
     jumpPressedAt = -1;
     puff(p.x + 9, p.y + 24, 3);
-    Sound.kickflip();
+    if (!p.doubleUsed) {
+      p.doubleUsed = true;
+      p.flip = 0.3;
+      Sound.kickflip();
+    } else {
+      loseBoard('kick');
+      toast('СКЕЙТ УЛЕТЕЛ');
+    }
   }
   p.flip = Math.max(0, p.flip - dt);
   if (p.vy >= 0) p.bounced = false;
@@ -1228,9 +1235,10 @@ function loseBoard(reason) {
   const crash = reason === 'crash';
   flyingBoards.push({
     x: p.x + 1, y: p.y + 21,
-    vx: crash ? -p.facing * (40 + Math.random() * 40) : reason === 'off' ? vx * 0.5 : 0,
-    vy: crash ? -90 - Math.random() * 60 : reason === 'off' ? -40 : 0,
-    spin: 0, spinning: crash,
+    vx: crash ? -p.facing * (40 + Math.random() * 40) : reason === 'off' ? vx * 0.5 : reason === 'kick' ? -p.facing * 30 : 0,
+    vy: crash ? -90 - Math.random() * 60 : reason === 'off' ? -40 : reason === 'kick' ? 120 : 0,
+    spin: 0, spinning: crash || reason === 'kick',
+    gone: reason === 'kick', // kicked away for good: it falls off the screen
   });
   Sound.boardLose(crash);
   if (crash) toast('БАХ!');
@@ -1265,7 +1273,7 @@ function updateBoards(dt) {
     f.y += f.vy * dt;
     if (f.spinning) f.spin += dt * 14;
     // Reached the pavement: it lies there again
-    if (f.vy > 0 && f.y >= GROUND_Y - 4 && overGround(f.x)) {
+    if (!f.gone && f.vy > 0 && f.y >= GROUND_Y - 4 && overGround(f.x)) {
       boards.push({ x: f.x, taken: false, armed: false });
       flyingBoards.splice(i, 1);
     } else if (f.y > VIEW_H + 20) {
@@ -1305,8 +1313,8 @@ function drawTurnedBoard(cx, cy, angle) {
   ctx.restore();
 }
 
-// While riding: a little board under the stage name, and an arrow that stays lit
-// until this board's one double jump is used.
+// While riding: a little board under the stage name, and an arrow: green while
+// the free double jump is left, red once the next one will cost the board.
 function drawBoardHud() {
   if (player.board <= 0) return;
   ctx.fillStyle = 'rgba(26,28,44,0.6)';
@@ -1315,7 +1323,7 @@ function drawBoardHud() {
   const ready = !player.doubleUsed;
   ctx.fillStyle = '#1a1c2c';
   ctx.fillRect(25, 16, 9, 8);
-  ctx.fillStyle = ready ? '#7dff8a' : '#4a4e6a';
+  ctx.fillStyle = ready ? '#7dff8a' : '#ff5a4a';
   ctx.fillRect(29, 17, 1, 6);
   ctx.fillRect(28, 18, 3, 1);
   ctx.fillRect(27, 19, 5, 1);
