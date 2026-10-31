@@ -269,6 +269,15 @@ const Sound = (() => {
     osc('pulse', 300, t + 0.02, 0.14, 0.05, sfxBus, 800);
   }
 
+  // Kickflip in the air: a quick whirring sweep up
+  function kickflip() {
+    if (!init() || muted) return;
+    const t = ctx.currentTime;
+    osc('pulse', 400, t, 0.2, 0.06, sfxBus, 1400);
+    osc('square', 600, t + 0.05, 0.12, 0.03, sfxBus, 1800);
+    hiss(t, 0.05, 0.2, sfxBus, 'highpass', 4000);
+  }
+
   function boardLand() {
     if (!init() || muted) return;
     const t = ctx.currentTime;
@@ -318,7 +327,7 @@ const Sound = (() => {
 
   return {
     beep, step, jump, land, startMusic, stopMusic, setUrgency, tick, pickup, fanfare, fail,
-    roll, ollie, boardLand, boardGet, boardLose,
+    roll, ollie, kickflip, boardLand, boardGet, boardLose,
     toggleMute() { setMuted(!muted); return !muted; },
     toggleMusic() { setMusic(!musicOn); return musicOn; },
   };

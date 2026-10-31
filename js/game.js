@@ -22,7 +22,8 @@ const PHYS = {
 };
 
 // Skateboard tuning: faster, rolls further, takes a moment to push up to speed.
-const BOARD = { time: 12, maxSpeed: 175, accel: 520, friction: 240 };
+// The board lasts until you lose it; once per jump you can kick off the air again.
+const BOARD = { maxSpeed: 175, accel: 520, friction: 240, doubleJump: 0.95 };
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -972,7 +973,9 @@ const player = {
   lastPose: -1,  // walk pose on the previous step, for footstep timing
   stun: 0,       // seconds without control after bumping into someone
   invuln: 0,     // seconds of blinking safety after a bump or fall
-  board: 0,      // seconds of skateboard left (0 = on foot)
+  board: 0,      // 1 while riding the skateboard
+  doubleUsed: false, // the board's mid-air jump has been spent
+  flip: 0,       // seconds left of the kickflip animation
 };
 
 let clock = 0;
@@ -1003,10 +1006,6 @@ function update(dt) {
   const onBoard = p.board > 0;
   const top = onBoard ? BOARD.maxSpeed : PHYS.maxSpeed;
   const maxSpeed = inPuddle ? top * (onBoard ? 0.7 : 0.5) : top;
-  if (onBoard) {
-    p.board -= dt;
-    if (p.board <= 0) loseBoard('time');
-  }
   if (inPuddle && Math.abs(p.vx) > 20 && Math.random() < 0.5) splash(feetX, GROUND_Y);
 
   // Braking hard against your own momentum
@@ -1041,7 +1040,17 @@ function update(dt) {
     jumpPressedAt = -1;
     puff(p.x + 9, p.y + 24, 4);
     if (p.board > 0) Sound.ollie(); else Sound.jump();
+  } else if (wantsJump && p.board > 0 && !p.grounded && !p.doubleUsed && p.stun <= 0) {
+    // Double jump on the skateboard: kick off the air once, with a kickflip
+    p.vy = -PHYS.jumpSpeed * BOARD.doubleJump;
+    p.doubleUsed = true;
+    p.flip = 0.3;
+    jumpPressedAt = -1;
+    puff(p.x + 9, p.y + 24, 3);
+    Sound.kickflip();
   }
+  if (p.grounded) p.doubleUsed = false;
+  p.flip = Math.max(0, p.flip - dt);
   if (p.vy >= 0) p.bounced = false;
   if (!keys.jump && !p.bounced && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
 
@@ -1097,7 +1106,7 @@ function update(dt) {
   }
   // The board only rolls on the street: land on boxes, an awning or a balcony
   // and you step off it there.
-  if (p.board > 0 && p.grounded && !wasGrounded && p.y + p.oy + p.h < GROUND_Y - 1) loseBoard('step');
+  if (p.board > 0 && p.grounded && p.y + p.oy + p.h < GROUND_Y - 1) loseBoard('step');
   updateBoards(dt);
   p.landTime = Math.max(0, p.landTime - dt);
 
@@ -1201,51 +1210,72 @@ function fellInPit() {
 
 // ---------- Skateboard ----------
 
-const boards = [];        // pickups: { x, taken }
-const flyingBoards = [];  // boards tumbling away after a crash or at the end
+const boards = [];        // pickups lying on the street: { x, taken, armed }
+const flyingBoards = [];  // boards falling or tumbling after you lose them
 function resetBoards() {
   boards.length = 0;
-  for (const x of boardSpots) boards.push({ x, taken: false });
+  for (const x of boardSpots) boards.push({ x, taken: false, armed: true });
   flyingBoards.length = 0;
   player.board = 0;
 }
 
+// Off the board. It drops to the street (or tumbles there after a crash) and
+// lies there to be picked up again, unless it falls into a hole.
 function loseBoard(reason) {
   const p = player;
-  if (p.board <= 0 && reason !== 'time') return;
+  if (p.board <= 0) return;
   p.board = 0;
+  p.flip = 0;
+  const vx = p.vx;
   // Back to walking pace
   p.vx = Math.max(-PHYS.maxSpeed, Math.min(PHYS.maxSpeed, p.vx));
+  const crash = reason === 'crash';
   flyingBoards.push({
-    x: p.x + 1, y: p.y + 21, vx: (reason === 'crash' ? -1 : 1) * p.facing * (40 + Math.random() * 40),
-    vy: -90 - Math.random() * 60, spin: 0, life: 1.2,
+    x: p.x + 1, y: p.y + 21,
+    vx: crash ? -p.facing * (40 + Math.random() * 40) : reason === 'off' ? vx * 0.5 : 0,
+    vy: crash ? -90 - Math.random() * 60 : reason === 'off' ? -40 : 0,
+    spin: 0, spinning: crash,
   });
-  Sound.boardLose(reason === 'crash');
-  if (reason === 'crash') toast('БАХ!');
+  Sound.boardLose(crash);
+  if (crash) toast('БАХ!');
+  else if (reason === 'step') toast('СКЕЙТ ВНИЗУ');
+}
+
+function overGround(x) {
+  return !pits.some((pt) => x + 12 > pt.x && x + 4 < pt.x + pt.w) &&
+    !crates.some((c) => c.y === 136 && x < c.x + 16 && x + 16 > c.x);
 }
 
 function updateBoards(dt) {
   const p = player;
-  if (p.board <= 0 && !finished) {
-    for (const b of boards) {
-      if (b.taken) continue;
-      if (p.x + p.ox < b.x + 16 && p.x + p.ox + p.w > b.x && p.y + p.oy + p.h > GROUND_Y - 8 && p.y + p.oy + p.h <= GROUND_Y + 1) {
-        b.taken = true;
-        p.board = BOARD.time;
-        toast('СКЕЙТ!');
-        Sound.boardGet();
-        break;
-      }
+  const px0 = p.x + p.ox;
+  const onStreet = p.y + p.oy + p.h > GROUND_Y - 8 && p.y + p.oy + p.h <= GROUND_Y + 1;
+  for (const b of boards) {
+    if (b.taken) continue;
+    const touching = px0 < b.x + 16 && px0 + p.w > b.x && onStreet;
+    // A board you just stepped off only counts once you have moved away from it
+    if (!touching) b.armed = true;
+    if (touching && b.armed && p.board <= 0 && !finished) {
+      b.taken = true;
+      p.board = 1;
+      p.doubleUsed = !p.grounded;
+      toast('СКЕЙТ!');
+      Sound.boardGet();
     }
   }
   for (let i = flyingBoards.length - 1; i >= 0; i--) {
     const f = flyingBoards[i];
-    f.life -= dt;
     f.vy += 600 * dt;
     f.x += f.vx * dt;
     f.y += f.vy * dt;
-    f.spin += dt * 14;
-    if (f.life <= 0) flyingBoards.splice(i, 1);
+    if (f.spinning) f.spin += dt * 14;
+    // Reached the pavement: it lies there again
+    if (f.vy > 0 && f.y >= GROUND_Y - 4 && overGround(f.x)) {
+      boards.push({ x: f.x, taken: false, armed: false });
+      flyingBoards.splice(i, 1);
+    } else if (f.y > VIEW_H + 20) {
+      flyingBoards.splice(i, 1); // lost down a hole
+    }
   }
   Sound.roll(p.board > 0 && p.grounded ? Math.abs(p.vx) / BOARD.maxSpeed : 0);
 }
@@ -1268,28 +1298,33 @@ function drawBoards(cx) {
       ctx.fillRect(x + 12, GROUND_Y - 6, 1, 1);
     }
   }
-  for (const f of flyingBoards) {
-    ctx.save();
-    ctx.translate(Math.round(f.x - cx) + 8, Math.round(f.y) + 2);
-    ctx.rotate(Math.round(f.spin * 4 / Math.PI) * Math.PI / 4); // in 45° steps, keeps the pixel look
-    ctx.drawImage(SKATEBOARD, -8, -2);
-    ctx.restore();
-  }
+  for (const f of flyingBoards) drawTurnedBoard(Math.round(f.x - cx) + 8, Math.round(f.y) + 2, f.spin);
 }
 
-// Skateboard time left: a little board and a bar under the stage name
-function drawBoardTimer() {
-  const t = player.board;
-  if (t <= 0) return;
-  const low = t < 3;
-  if (low && Math.floor(clock * 8) % 2) return;
+// The board turned in 45° steps, which keeps the pixel look
+function drawTurnedBoard(cx, cy, angle) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.round(angle * 4 / Math.PI) * Math.PI / 4);
+  ctx.drawImage(SKATEBOARD, -8, -2);
+  ctx.restore();
+}
+
+// While riding: a little board under the stage name, and an arrow that is lit
+// while the mid-air double jump is still available.
+function drawBoardHud() {
+  if (player.board <= 0) return;
   ctx.fillStyle = 'rgba(26,28,44,0.6)';
-  ctx.fillRect(2, 15, 60, 10);
+  ctx.fillRect(2, 15, 36, 10);
   ctx.drawImage(SKATEBOARD, 4, 18);
+  const ready = !player.doubleUsed;
   ctx.fillStyle = '#1a1c2c';
-  ctx.fillRect(22, 18, 38, 5);
-  ctx.fillStyle = low ? '#ff5a4a' : '#7dff8a';
-  ctx.fillRect(23, 19, Math.round(36 * t / BOARD.time), 3);
+  ctx.fillRect(25, 16, 9, 8);
+  ctx.fillStyle = ready ? '#7dff8a' : '#4a4e6a';
+  ctx.fillRect(29, 17, 1, 6);
+  ctx.fillRect(28, 18, 3, 1);
+  ctx.fillRect(27, 19, 5, 1);
+  ctx.fillRect(26, 20, 7, 1);
 }
 
 // ---------- Checkpoint ----------
@@ -1699,7 +1734,10 @@ function render() {
   } else {
     ctx.drawImage(img, px, py);
   }
-  if (riding && !blinkOut) ctx.drawImage(SKATEBOARD, px + 1, py + 23);
+  if (riding && !blinkOut) {
+    if (player.flip > 0) drawTurnedBoard(px + 9, py + 25, (0.3 - player.flip) / 0.3 * Math.PI * 2);
+    else ctx.drawImage(SKATEBOARD, px + 1, py + 23);
+  }
 
   for (const s of steam) {
     ctx.fillStyle = s.life > 0.5 ? 'rgba(244,244,244,0.8)' : 'rgba(244,244,244,0.4)';
@@ -1712,7 +1750,7 @@ function render() {
   }
 
   drawProgressBar();
-  drawBoardTimer();
+  drawBoardHud();
 }
 
 // ---------- Loop and scaling ----------
