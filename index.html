@@ -16,7 +16,7 @@
 
       <div class="hud">
         <span>ЭТАП 1</span>
-        <span class="hint">← → ходить · ПРОБЕЛ прыжок · R на базу · M звук</span>
+        <span class="hint">← → ходить · ПРОБЕЛ прыжок · R на базу · M звук · N музыка</span>
       </div>
 
       <div id="toast" class="toast" aria-live="polite"></div>
@@ -33,10 +33,12 @@
       <button data-action="left" aria-label="Влево">◀</button>
       <button data-action="right" aria-label="Вправо">▶</button>
     </div>
+    <button class="pad-base pad-music" data-music aria-label="Музыка вкл/выкл">♪</button>
     <button class="pad-base" data-base aria-label="На базу">R</button>
     <button class="pad-jump" data-action="jump" aria-label="Прыжок">A</button>
   </div>
 
+  <script src="js/audio.js"></script>
   <script src="js/sprites.js"></script>
   <script src="js/game.js"></script>
 </body>

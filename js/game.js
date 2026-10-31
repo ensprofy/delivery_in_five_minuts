@@ -315,29 +315,6 @@ function drawAwning(a, camX) {
   ctx.fillRect(x + a.w - 2, a.y + 5, 1, 6);
 }
 
-// ---------- Sound ----------
-
-let audio = null;
-let muted = false;
-
-function beep(from, to, dur, type = 'square', vol = 0.06) {
-  if (muted) return;
-  if (!audio) {
-    try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
-  }
-  const t = audio.currentTime;
-  const o = audio.createOscillator();
-  const v = audio.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(from, t);
-  o.frequency.exponentialRampToValueAtTime(to, t + dur);
-  v.gain.setValueAtTime(vol, t);
-  v.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(v).connect(audio.destination);
-  o.start(t);
-  o.stop(t + dur);
-}
-
 // ---------- Input ----------
 
 const keys = { left: false, right: false, jump: false };
@@ -357,7 +334,8 @@ function press(action) {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyM') { muted = !muted; return; }
+  if (e.code === 'KeyM') { toast(Sound.toggleMute() ? 'ЗВУК ВКЛ' : 'ЗВУК ВЫКЛ'); return; }
+  if (e.code === 'KeyN') { toast(Sound.toggleMusic() ? 'МУЗЫКА ВКЛ' : 'МУЗЫКА ВЫКЛ'); return; }
   if (e.code === 'KeyR' && started) { respawn(); return; }
   const action = KEYMAP[e.code];
   if (!action) { if (!started) start(); return; }
@@ -383,6 +361,12 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
   btn.addEventListener('pointercancel', release);
 });
 canvas.addEventListener('pointerdown', () => { if (!started) start(); });
+document.querySelector('[data-music]').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const on = Sound.toggleMusic();
+  e.currentTarget.classList.toggle('off', !on);
+  toast(on ? 'МУЗЫКА ВКЛ' : 'МУЗЫКА ВЫКЛ');
+});
 document.querySelector('[data-base]').addEventListener('pointerdown', (e) => {
   e.preventDefault();
   if (started) respawn(); else start();
@@ -392,6 +376,7 @@ function start() {
   started = true;
   document.getElementById('title').hidden = true;
   beep(440, 880, 0.12);
+  Sound.startMusic();
 }
 
 // ---------- Courier ----------
@@ -407,6 +392,7 @@ const player = {
   landTime: 0,   // seconds left on the landing crouch
   skidding: false,
   skidTime: 0,   // seconds left on the braking pose
+  lastPose: -1,  // walk pose on the previous step, for footstep timing
 };
 
 let clock = 0;
@@ -457,7 +443,7 @@ function update(dt) {
     p.sinceGround = PHYS.coyote + 1;
     jumpPressedAt = -1;
     puff(p.x + 9, p.y + 24, 4);
-    beep(300, 700, 0.15);
+    Sound.jump();
   }
   if (!keys.jump && p.vy < -PHYS.jumpSpeed * PHYS.jumpCut) p.vy = -PHYS.jumpSpeed * PHYS.jumpCut;
 
@@ -499,13 +485,18 @@ function update(dt) {
 
   if (p.grounded && !wasGrounded && fallSpeed > 120) {
     puff(p.x + 9, p.y + 24, 6);
-    beep(160, 80, 0.08, 'triangle', 0.08);
+    Sound.land(fallSpeed > 250);
     p.landTime = fallSpeed > 250 ? 0.14 : 0.09;
   }
   p.landTime = Math.max(0, p.landTime - dt);
 
   // Walk cycle advances with distance, so faster steps at full speed
   p.animTime = p.grounded && Math.abs(p.vx) > 5 ? p.animTime + Math.abs(p.vx) * dt : 0;
+
+  // A footstep each time a foot touches down in the walk cycle (poses 0 and 2)
+  const pose = p.animTime > 0 ? Math.floor(p.animTime / 7) % 4 : -1;
+  if (pose !== p.lastPose && pose % 2 === 0 && !p.skidding) Sound.step();
+  p.lastPose = pose;
 
   // Steam from the hot pizza in the backpack
   if (Math.random() < dt * 3) {

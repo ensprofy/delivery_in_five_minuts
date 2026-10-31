@@ -148,3 +148,7 @@ canvas {
   margin-left: auto;
   margin-right: 16px;
 }
+
+.pad .pad-music { margin-left: auto; margin-right: 8px; }
+.pad .pad-music + .pad-base { margin-left: 0; }
+.pad .pad-music.off { opacity: 0.45; }
