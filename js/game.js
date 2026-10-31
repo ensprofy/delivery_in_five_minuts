@@ -2,7 +2,7 @@
 
 const VIEW_W = 320;
 const VIEW_H = 180;
-const WORLD_W = 20800;     // 1.3 km of street
+const WORLD_W = 28000;     // 1.75 km of street
 const PX_PER_METRE = 16;
 const GROUND_Y = 152;
 const STEP = 1 / 60;
@@ -56,6 +56,8 @@ const awningList = [
 const pits = [];        // { x, w }
 const pedestrians = []; // { x, min, max, dir, speed, look, anim }
 const puddles = [];     // { x, w }
+const clockSpots = [];  // { x, y, gold }: where the bonus clocks hang
+const balconyList = []; // [x, y, w]
 
 (function generateObstacles() {
   const r = rng(2024);
@@ -80,6 +82,7 @@ const puddles = [];     // { x, w }
     for (let k = -sunk; k < h; k++) crateList.push([x, 136 - k * 16]);
   }
   const step4 = (lo, hi) => lo + Math.floor(r() * ((hi - lo) / 4 + 1)) * 4; // random multiple of 4
+  const clock = (x, y, gold = false) => clockSpots.push({ x, y, gold });
 
   // ----- Parkour pieces. Each returns its width. Jump sizes are kept inside
   // what the courier can do: about 64 px across on the level, ~50 px when
@@ -89,16 +92,16 @@ const puddles = [];     // { x, w }
   // Wide enough that a full jump from the edge still lands on the next one.
   function pillars(x, d) {
     const n = 3 + Math.floor(r() * (2 + d * 2));
-    const gap = step4(28, 32 + Math.round(d * 12));
-    let h = 1 + Math.floor(r() * 2);
+    const gap = step4(32, 36 + Math.round(d * 12)); // stride ≥ a full jump, so landings never drift past the edge
+    const h = 1 + Math.floor(r() * 2); // one height per section: stepping down overshoots
     const w = gap + n * (32 + gap);
     pits.push({ x, w });
     for (let i = 0; i < n; i++) {
       const px = x + gap + i * (32 + gap);
       column(px, h, 2);
       column(px + 16, h, 2);
-      h = Math.max(1, Math.min(2, h + (r() < 0.5 ? -1 : 1)));
     }
+    if (r() < 0.3) clock(x + gap + 32 + gap / 2, 104); // mid-air, between the first two pillars
     return w;
   }
 
@@ -110,9 +113,10 @@ const puddles = [];     // { x, w }
     let ax = x + 32;
     const pitX = ax;
     for (let i = 0; i < n; i++) {
-      ax += step4(28, 32 + Math.round(d * 8));
+      ax += step4(32, 36 + Math.round(d * 8));
       const aw = 32 + Math.floor(r() * 2) * 16;
       awningList.push([ax, 120, aw]);
+      if (i === 1 && r() < 0.3) clock(ax + aw / 2, 104);
       ax += aw;
     }
     ax += step4(24, 32);
@@ -126,6 +130,7 @@ const puddles = [];     // { x, w }
     let ax = x + 24;
     ys.forEach((y, i) => {
       awningList.push([ax, y, 48]);
+      if (i === 2 && r() < 0.4) clock(ax + 24, y - 14);
       ax += 48 + (i < 2 ? step4(20, 28) : step4(24, 32)); // going down you fly further
     });
     pits.push({ x, w: ax - x });
@@ -138,9 +143,30 @@ const puddles = [];     // { x, w }
     column(x + 16, 2);
     column(x + 32, 3);
     column(x + 48, 4);
+    if (r() < 0.4) clock(x + 56, 74);
     const pw = step4(40, 48 + Math.round(d * 16));
     pits.push({ x: x + 64, w: pw });
     return 64 + pw;
+  }
+
+  // Climb up the front of a building: a crate, an awning, a balcony with boxes
+  // on it, and sometimes a second balcony higher up with a golden clock.
+  function balconies(x) {
+    column(x, 1);
+    awningList.push([x + 24, 112, 64]);
+    const bx = x + 48;
+    balconyList.push([bx, 80, 64]);
+    const boxes = 1 + Math.floor(r() * 2);
+    for (let i = 0; i < boxes; i++) crateList.push([bx + 16 + i * 16, 64]);
+    if (r() < 0.7) clock(bx + 56, 66);
+    let end = bx + 64;
+    if (r() < 0.5) {
+      // A second balcony above and ahead, reached from the first
+      balconyList.push([bx + 40, 48, 48]);
+      clock(bx + 64, 34, true);
+      end = bx + 88;
+    }
+    return end - x + 72; // room to land after dropping off the top
   }
 
   let x = START;
@@ -150,12 +176,13 @@ const puddles = [];     // { x, w }
     let width;
     if (roll < 0.14 + d * 0.22) {
       // Parkour section
-      width = pick([pillars, bridge, stairs, tower])(x, d);
+      width = pick([pillars, bridge, stairs, tower, balconies])(x, d);
     } else if (roll < 0.36 + d * 0.16) {
       // Pit: 32 px early on, up to 48 px later (a full-speed jump clears about 54)
       width = 32 + Math.floor(r() * (1 + d * 1.99)) * 8;
       pits.push({ x, w: width });
       if (r() < 0.35) awningList.push([x - 8, 96 + Math.floor(r() * 2) * 10, width + 16]);
+      else if (r() < 0.15) clock(x + width / 2, 100); // grab it mid-jump
     } else if (roll < 0.50 + d * 0.16) {
       // Pedestrian strolling back and forth
       width = 90 + Math.floor(r() * 60);
@@ -173,6 +200,8 @@ const puddles = [];     // { x, w }
       const pattern = r() < 0.2 + d * 0.6 ? pick(HARD) : pick(EASY);
       for (const [dx, h] of pattern) column(x + dx, h);
       width = pattern[pattern.length - 1][0] + 16;
+      const peak = pattern.reduce((a, b) => (b[1] > a[1] ? b : a));
+      if (r() < 0.1) clock(x + peak[0] + 8, 136 - (peak[1] - 1) * 16 - 14);
       if (r() < 0.35) {
         const aw = 48 + Math.floor(r() * 3) * 16;
         awningList.push([x + width + 24 + Math.floor(r() * 40), 88 + Math.floor(r() * 3) * 10, aw]);
@@ -212,6 +241,8 @@ solids.push({ x: -16, y: -200, w: 16, h: 400 }, { x: WORLD_W, y: -200, w: 16, h:
 
 // Awnings: you can jump up through them and land on top.
 const awnings = awningList.map(([x, y, w]) => ({ x, y, w, h: 4 }));
+// Balconies work the same way (land on top, jump up through), they only look different.
+for (const [x, y, w] of balconyList) awnings.push({ x, y, w, h: 4, balcony: true });
 
 // ---------- Art ----------
 
@@ -222,6 +253,32 @@ function layer(w, h, draw) {
   const g = c.getContext('2d');
   draw(g);
   return c;
+}
+
+// A very wide picture split into 4096 px strips, because browsers refuse
+// canvases much wider than that. `draw` paints the whole thing in world
+// coordinates; each strip keeps its own slice.
+const CHUNK = 4096;
+function chunkedLayer(w, h, draw) {
+  const chunks = [];
+  for (let x0 = 0; x0 < w; x0 += CHUNK) {
+    const c = document.createElement('canvas');
+    c.width = Math.min(CHUNK, w - x0);
+    c.height = h;
+    const g = c.getContext('2d');
+    g.translate(-x0, 0);
+    draw(g);
+    chunks.push({ x0, c });
+  }
+  return chunks;
+}
+
+function drawChunked(chunks, cx) {
+  for (const { x0, c } of chunks) {
+    const from = Math.max(cx, x0);
+    const to = Math.min(cx + VIEW_W, x0 + c.width);
+    if (to > from) ctx.drawImage(c, from - x0, 0, to - from, VIEW_H, from - cx, 0, to - from, VIEW_H);
+  }
 }
 
 const SKY = ['#3d6fb6', '#4a7fc2', '#5b92cf', '#70a7dc', '#8bbde6', '#a9d2ef'];
@@ -282,6 +339,9 @@ const GLYPHS = {
   T: '111010010010010', M: '101111111101101', Y: '101101010010010',
   N: '110101101101101', D: '110101101101110', L: '100100100100111',
   U: '101101101101111', ' ': '000000000000000',
+  '0': '111101101101111', '1': '010110010010111', '3': '111001111001111',
+  '5': '111100111001111', '6': '111100111101111', '7': '111001010010010',
+  '8': '111101111101111', '9': '111101111001111', '+': '000010111010000',
 };
 
 function pixelText(g, text, x, y, color, size = 1) {
@@ -440,7 +500,7 @@ function drawDestination(g) {
 }
 
 // Street facades, drawn at full scroll speed behind the courier.
-const street = layer(WORLD_W, VIEW_H, (g) => {
+const street = chunkedLayer(WORLD_W, VIEW_H, (g) => {
   const r = rng(42);
   const colors = [
     ['#b0533c', '#8a3d2c'], ['#c9a86a', '#a3854f'], ['#6b8f71', '#4f6e55'],
@@ -618,12 +678,63 @@ const cardBox = gridImage([
   T: '#efe4bf', t: '#c7b78a', r: '#d23c3c', W: '#f4f4f4', k: '#8e8e9a',
 });
 
+// Bonus alarm clocks: red ones give +5 s, golden ones +15 s.
+const CLOCK_ROWS = [
+  '.KK...KK.',
+  'KRRKKKRRK',
+  '.KKWWWKK.',
+  'KRWWKWWRK',
+  'KRWWKWWRK',
+  'KRWWKKWRK',
+  'KRWWWWWRK',
+  '.KRWWWRK.',
+  '..KKKKK..',
+  '.KK...KK.',
+];
+const clockRed = gridImage(CLOCK_ROWS, { K: '#1a1c2c', R: '#d23c3c', W: '#f4f4f4' });
+const clockGold = gridImage(CLOCK_ROWS, { K: '#1a1c2c', R: '#f7d51d', W: '#fff6d5' });
+
 function boxImage(c) {
   return c.card ? cardBox : woodCrate;
 }
 
+// Stone balcony: a doorway in the wall behind, a slab to stand on, an iron
+// railing and two brackets underneath.
+function drawBalcony(a, x) {
+  const y = a.y;
+  // Doorway behind
+  const dx = x + Math.round(a.w / 2) - 7;
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(dx - 1, y - 23, 16, 23);
+  ctx.fillStyle = '#3b3f5c';
+  ctx.fillRect(dx, y - 22, 14, 22);
+  ctx.fillStyle = '#f7d57a';
+  ctx.fillRect(dx + 2, y - 20, 4, 8);
+  ctx.fillRect(dx + 8, y - 20, 4, 8);
+  // Railing
+  ctx.fillStyle = '#1a1c2c';
+  ctx.fillRect(x, y - 11, a.w, 2);
+  for (let i = 1; i < a.w - 1; i += 4) ctx.fillRect(x + i, y - 9, 1, 9);
+  ctx.fillRect(x, y - 11, 2, 11);
+  ctx.fillRect(x + a.w - 2, y - 11, 2, 11);
+  // Slab
+  ctx.fillRect(x - 2, y - 1, a.w + 4, 7);
+  ctx.fillStyle = '#b7b9cc';
+  ctx.fillRect(x - 1, y, a.w + 2, 2);
+  ctx.fillStyle = '#8d8fa6';
+  ctx.fillRect(x - 1, y + 2, a.w + 2, 3);
+  // Brackets
+  ctx.fillStyle = '#1a1c2c';
+  for (const bx of [x + 4, x + a.w - 9]) {
+    ctx.fillRect(bx, y + 6, 5, 2);
+    ctx.fillRect(bx + 1, y + 8, 3, 2);
+    ctx.fillRect(bx + 2, y + 10, 1, 2);
+  }
+}
+
 function drawAwning(a, camX) {
   const x = Math.round(a.x - camX);
+  if (a.balcony) { drawBalcony(a, x); return; }
   ctx.fillStyle = '#1a1c2c';
   ctx.fillRect(x - 1, a.y - 1, a.w + 2, 7);
   for (let i = 0; i < a.w; i += 8) {
@@ -1000,6 +1111,54 @@ let finished = false;
 let lastWholeSecond = TIME_LIMIT;
 const confetti = [];
 
+const clocks = clockSpots.map((c) => ({ ...c, taken: false }));
+const floaters = []; // little "+5" texts that drift up
+let clocksTaken = 0;
+let bonusFlash = 0;
+
+function updateClocks(dt) {
+  const p = player;
+  for (const c of clocks) {
+    if (c.taken) continue;
+    if (p.x + p.ox < c.x + 5 && p.x + p.ox + p.w > c.x - 5 && p.y + p.oy < c.y + 5 && p.y + p.oy + p.h > c.y - 5) {
+      c.taken = true;
+      clocksTaken++;
+      const bonus = c.gold ? 15 : 5;
+      timeLeft += bonus;
+      bonusFlash = 0.7;
+      floaters.push({ x: c.x, y: c.y - 8, text: `+${bonus}`, life: 0.9, color: c.gold ? '#f7d51d' : '#7dff8a' });
+      for (let i = 0; i < 8; i++) {
+        dust.push({ x: c.x, y: c.y, vx: Math.cos(i * 0.785) * 50, vy: Math.sin(i * 0.785) * 50, life: 0.3, color: c.gold ? '#f7d51d' : '#f4f4f4' });
+      }
+      Sound.pickup(c.gold);
+    }
+  }
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i];
+    f.life -= dt;
+    f.y -= 18 * dt;
+    if (f.life <= 0) floaters.splice(i, 1);
+  }
+  bonusFlash = Math.max(0, bonusFlash - dt);
+}
+
+function drawClocks(cx) {
+  for (const c of clocks) {
+    if (c.taken || c.x < cx - 10 || c.x > cx + VIEW_W + 10) continue;
+    const bob = Math.round(Math.sin(clock * 4 + c.x) * 1.5);
+    const shake = Math.floor(clock * 20 + c.x) % 8 === 0 ? 1 : 0; // the alarm rattles now and then
+    ctx.drawImage(c.gold ? clockGold : clockRed, Math.round(c.x - 4 - cx) + shake, Math.round(c.y - 5) + bob);
+    if (Math.floor(clock * 3 + c.x) % 4 === 0) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(Math.round(c.x + 5 - cx), Math.round(c.y - 7) + bob, 1, 1);
+    }
+  }
+  for (const f of floaters) {
+    pixelText(ctx, f.text, Math.round(f.x - cx - 4) + 1, Math.round(f.y) + 1, '#1a1c2c');
+    pixelText(ctx, f.text, Math.round(f.x - cx - 4), Math.round(f.y), f.color);
+  }
+}
+
 const timerEl = document.getElementById('timer');
 const distEl = document.getElementById('dist');
 
@@ -1042,7 +1201,8 @@ function finish(delivered) {
   if (delivered) {
     Sound.fanfare();
     document.getElementById('result-title').textContent = 'ДОСТАВЛЕНО!';
-    document.getElementById('result-text').textContent = `Осталось ${formatTime(timeLeft)}. Пицца ещё горячая!`;
+    document.getElementById('result-text').textContent =
+      `Осталось ${formatTime(timeLeft)}. Часиков: ${clocksTaken} из ${clocks.length}. Пицца ещё горячая!`;
     for (let i = 0; i < 40; i++) {
       confetti.push({
         x: DEST.doorX, y: 100, vx: (Math.random() - 0.5) * 160, vy: -80 - Math.random() * 120,
@@ -1053,7 +1213,7 @@ function finish(delivered) {
     Sound.fail();
     document.getElementById('result-title').textContent = 'ВРЕМЯ ВЫШЛО';
     document.getElementById('result-text').textContent =
-      `До дома оставалось ${Math.ceil(distanceLeft() / PX_PER_METRE)} м. Пицца остыла.`;
+      `До дома оставалось ${Math.ceil(distanceLeft() / PX_PER_METRE)} м. Часиков: ${clocksTaken} из ${clocks.length}.`;
   }
   setTimeout(() => { if (finished) box.hidden = false; }, delivered ? 900 : 600);
 }
@@ -1064,6 +1224,9 @@ function restart() {
   timeLeft = TIME_LIMIT;
   lastWholeSecond = TIME_LIMIT;
   confetti.length = 0;
+  for (const c of clocks) c.taken = false;
+  clocksTaken = 0;
+  floaters.length = 0;
   Object.assign(player, { x: CHECKPOINT.x, y: GROUND_Y - 24, vx: 0, vy: 0, facing: 1, landTime: 0, skidTime: 0 });
   awayFromBase = false;
   camX = 0;
@@ -1086,6 +1249,7 @@ function updateHud() {
   timerEl.textContent = formatTime(timeLeft);
   timerEl.classList.toggle('hurry', timeLeft <= 60 && timeLeft > 30);
   timerEl.classList.toggle('panic', timeLeft <= 30 && !finished);
+  timerEl.classList.toggle('bonus', bonusFlash > 0);
   distEl.textContent = `${Math.ceil(distanceLeft() / PX_PER_METRE)} м`;
 }
 
@@ -1206,12 +1370,13 @@ function render() {
   for (let x = cloudOff; x < VIEW_W; x += clouds.width) ctx.drawImage(clouds, x, 0);
   tiled(farCity, 0.2);
   tiled(midCity, 0.5);
-  ctx.drawImage(street, cx, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  drawChunked(street, cx);
 
   for (const a of awnings) if (a.x + a.w > cx && a.x < cx + VIEW_W) drawAwning(a, cx);
   for (const c of crates) if (c.x + 16 > cx && c.x < cx + VIEW_W) ctx.drawImage(boxImage(c), Math.round(c.x) - cx, c.y);
   drawFlag(cx);
   if (!finished) drawDoorArrow(cx);
+  drawClocks(cx);
 
   for (const d of dust) {
     ctx.fillStyle = d.color || '#d6dbe4';
@@ -1273,7 +1438,7 @@ function frame(now) {
   acc += Math.min(0.1, (now - last) / 1000);
   last = now;
   while (acc >= STEP) {
-    if (started) { update(STEP); updateCheckpoint(STEP); updateRun(STEP); updateConfetti(STEP); }
+    if (started) { update(STEP); updateCheckpoint(STEP); updateRun(STEP); if (!finished) updateClocks(STEP); updateConfetti(STEP); }
     else clock += STEP;
     acc -= STEP;
   }

@@ -76,6 +76,7 @@ canvas {
 }
 .timer.hurry { color: var(--yellow); }
 .timer.panic { color: #ff5a4a; animation: blink 0.5s steps(1) infinite; }
+.timer.bonus { color: #7dff8a; animation: none; transform: translateX(-50%) scale(1.15); }
 
 /* Metres left, just above the progress bar on the right */
 .dist {
@@ -90,7 +91,7 @@ canvas {
   pointer-events: none;
 }
 
-.title .sub { font-size: calc(var(--px) * 4); color: #c4e3f5; }
+.title .sub { font-size: calc(var(--px) * 4); line-height: 1.6; color: #c4e3f5; }
 .result h1 { color: var(--yellow); }
 .result.fail h1 { color: #ff5a4a; text-shadow: var(--px) var(--px) 0 var(--outline), calc(var(--px) * 2) calc(var(--px) * 2) 0 var(--outline); }
 

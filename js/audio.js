@@ -233,6 +233,11 @@ const Sound = (() => {
     });
   }
 
+  // Picking up a clock: a quick bright arpeggio, longer for a golden one.
+  function pickup(gold) {
+    playNotes(gold ? ['E6', 'G6', 'C7', 'E7'] : ['A5', 'C#6', 'E6'], 0.05, 'pulse', 0.07);
+  }
+
   function fanfare() {
     playNotes(['C5', 'E5', 'G5', 'C6', '.', 'G5', 'C6', '.', '.', 'E6'], 0.11, 'pulse', 0.09);
     playNotes(['C4', '.', 'G4', '.', 'C5', '.', 'E4', '.', 'C4'], 0.11, 'triangle', 0.18);
@@ -262,7 +267,7 @@ const Sound = (() => {
   });
 
   return {
-    beep, step, jump, land, startMusic, stopMusic, setUrgency, tick, fanfare, fail,
+    beep, step, jump, land, startMusic, stopMusic, setUrgency, tick, pickup, fanfare, fail,
     toggleMute() { setMuted(!muted); return !muted; },
     toggleMusic() { setMusic(!musicOn); return musicOn; },
   };
